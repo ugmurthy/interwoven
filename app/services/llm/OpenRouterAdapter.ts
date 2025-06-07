@@ -28,10 +28,7 @@ export class OpenRouterAdapter extends BaseLLMService {
         },
         body: JSON.stringify({
           model: request.model,
-          messages: [
-            { role: 'system', content: 'You are a helpful assistant.' },
-            { role: 'user', content: request.prompt }
-          ],
+          messages: this.formatMessages(request.prompt),
           ...request.parameters,
           tools: request.tools ? this.formatTools(request.tools) : undefined,
         }),
@@ -141,5 +138,32 @@ export class OpenRouterAdapter extends BaseLLMService {
         parameters: tool.configuration,
       }
     }));
+  }
+  
+  /**
+   * Format messages from the prompt
+   * @param prompt The combined prompt
+   * @returns Formatted messages for OpenRouter API
+   */
+  private formatMessages(prompt: string): any[] {
+    // Extract system prompt and user prompt from the combined prompt
+    // The format is expected to be: [system prompt]\n\n[user prompt]
+    let systemPrompt = 'You are a helpful assistant.';
+    let userPrompt = prompt;
+    
+    // Check if the prompt contains a system prompt
+    const promptParts = prompt.split('\n\n');
+    if (promptParts.length > 1) {
+      systemPrompt = promptParts[0];
+      userPrompt = promptParts.slice(1).join('\n\n');
+    }
+    
+    console.log('OpenRouter formatMessages - System prompt:', systemPrompt);
+    console.log('OpenRouter formatMessages - User prompt:', userPrompt);
+    
+    return [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: userPrompt }
+    ];
   }
 }

@@ -1,26 +1,46 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router';
 import { Layout } from '../components/ui/Layout';
-import { ArrowLeft, Save } from 'lucide-react';
+import { ArrowLeft, Save, RefreshCw } from 'lucide-react';
 import { ModelCard, ModelCapabilities, Parameter } from '../types';
 import { v4 as uuidv4 } from 'uuid';
 import { ModelCardConnector } from '../components/model-card/ModelCardConnector';
 import { MCPServerConnector } from '../components/mcp/MCPServerConnector';
 import { useModelCard } from '../context/ModelCardContext';
+import { useLLM } from '../context/LLMContext';
 
 export default function ModelCardEditor() {
+  // State to track if we're in the browser
+  const [isBrowser, setIsBrowser] = useState(false);
+  
+  // Initialize on mount (client-side only)
+  useEffect(() => {
+    setIsBrowser(true);
+  }, []);
+  
+  // Force a re-render when isBrowser changes
+  const [, forceUpdate] = useState({});
+  useEffect(() => {
+    if (isBrowser) {
+      forceUpdate({});
+    }
+  }, [isBrowser]);
+  
   const params = useParams();
   // Check if we're on the "new" route or editing an existing card
   const modelCardId = params.id === "model-card-new" ? null : params.id;
   const navigate = useNavigate();
   
-  const {
-    modelCards,
-    getModelCard,
-    createModelCard,
-    updateModelCard,
-    isLoading: isServiceLoading
-  } = useModelCard();
+  // Safe access to context hooks with conditional rendering
+  const modelCardContext = isBrowser ? useModelCard() : null;
+  const llmContext = isBrowser ? useLLM() : null;
+  
+  // Extract values from context if available
+  const modelCards = modelCardContext?.modelCards || [];
+  const getModelCard = modelCardContext?.getModelCard;
+  const createModelCard = modelCardContext?.createModelCard;
+  const updateModelCard = modelCardContext?.updateModelCard;
+  const isServiceLoading = modelCardContext?.isLoading || false;
   
   // State for the model card being edited
   const [modelCard, setModelCard] = useState<ModelCard | null>(null);
@@ -32,6 +52,22 @@ export default function ModelCardEditor() {
   const [systemPrompt, setSystemPrompt] = useState('');
   const [llmProvider, setLlmProvider] = useState<'openrouter' | 'ollama'>('openrouter');
   const [llmModel, setLlmModel] = useState('');
+  const [availableModels, setAvailableModels] = useState<string[]>([]);
+  const [isLoadingModels, setIsLoadingModels] = useState(false);
+  
+  // Get LLM context values
+  const providers = llmContext?.providers || {
+    openrouter: { availableModels: [], isAvailable: false, isLoading: false },
+    ollama: { availableModels: [], isAvailable: false, isLoading: false }
+  };
+  const activeProvider = llmContext?.activeProvider || 'openrouter';
+  const setActiveProvider = llmContext?.setActiveProvider || (() => {});
+  const refreshLLMModels = llmContext?.refreshModels || (async () => {});
+  
+  // Update available models when provider changes
+  useEffect(() => {
+    setAvailableModels(providers[llmProvider].availableModels);
+  }, [providers, llmProvider]);
   const [parameters, setParameters] = useState<Parameter[]>([]);
   const [capabilities, setCapabilities] = useState<ModelCapabilities>({
     supportsImages: false,
@@ -58,6 +94,8 @@ export default function ModelCardEditor() {
   
   // Load model card data on mount
   useEffect(() => {
+    if (!isBrowser || !getModelCard) return;
+    
     const loadModelCard = async () => {
       setIsLoading(true);
       
@@ -93,7 +131,7 @@ export default function ModelCardEditor() {
     };
     
     loadModelCard();
-  }, [modelCardId, getModelCard]);
+  }, [isBrowser, modelCardId, getModelCard]);
   
   // Create a new model card
   const createNewModelCard = () => {
@@ -131,7 +169,7 @@ export default function ModelCardEditor() {
   
   // Handle save model card
   const handleSaveModelCard = async () => {
-    if (!modelCard) return;
+    if (!isBrowser || !modelCard || !createModelCard || !updateModelCard) return;
     
     try {
       const updatedCardData = {
@@ -223,7 +261,8 @@ export default function ModelCardEditor() {
   // Tabs for different sections
   const [activeTab, setActiveTab] = useState<'basic' | 'parameters' | 'capabilities' | 'connections' | 'mcp'>('basic');
   
-  if (isLoading || isServiceLoading || !modelCard) {
+  // During server-side rendering or while loading, show a simplified version
+  if (!isBrowser || isLoading || isServiceLoading || !modelCard) {
     return (
       <Layout>
         <div className="max-w-4xl mx-auto p-4">
@@ -364,26 +403,80 @@ export default function ModelCardEditor() {
                 <select
                   id="llmProvider"
                   value={llmProvider}
-                  onChange={(e) => setLlmProvider(e.target.value as 'openrouter' | 'ollama')}
+                  onChange={(e) => {
+                    const newProvider = e.target.value as 'openrouter' | 'ollama';
+                    setLlmProvider(newProvider);
+                    setActiveProvider(newProvider);
+                    // Clear model selection if no models available
+                    if (providers[newProvider].availableModels.length === 0) {
+                      setLlmModel('');
+                    }
+                  }}
                   className="w-full px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
                 >
-                  <option value="openrouter">OpenRouter</option>
-                  <option value="ollama">Ollama</option>
+                  <option value="openrouter">
+                    OpenRouter {!providers.openrouter.isAvailable && '(Not Available)'}
+                  </option>
+                  <option value="ollama">
+                    Ollama {!providers.ollama.isAvailable && '(Not Available)'}
+                  </option>
                 </select>
               </div>
               
               <div>
-                <label htmlFor="llmModel" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                  LLM Model
-                </label>
-                <input
-                  type="text"
-                  id="llmModel"
-                  value={llmModel}
-                  onChange={(e) => setLlmModel(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
-                  placeholder={llmProvider === 'openrouter' ? 'anthropic/claude-3-opus' : 'llama3'}
-                />
+                <div className="flex justify-between items-center mb-1">
+                  <label htmlFor="llmModel" className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                    LLM Model
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      refreshLLMModels().catch(error => {
+                        console.error('Error refreshing models:', error);
+                      });
+                    }}
+                    className="text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 text-xs flex items-center"
+                    title="Refresh Models"
+                  >
+                    <RefreshCw size={12} className={`mr-1 ${providers && providers[llmProvider] && providers[llmProvider].isLoading ? 'animate-spin' : ''}`} />
+                    Refresh
+                  </button>
+                </div>
+                
+                {providers && providers[llmProvider] && providers[llmProvider].availableModels && providers[llmProvider].availableModels.length > 0 ? (
+                  <select
+                    id="llmModel"
+                    value={llmModel}
+                    onChange={(e) => setLlmModel(e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
+                  >
+                    <option value="">Select a model</option>
+                    {providers && providers[llmProvider] && providers[llmProvider].availableModels ?
+                      providers[llmProvider].availableModels.map((model: string) => (
+                        <option key={model} value={model}>
+                          {model}
+                        </option>
+                      )) : null
+                    }
+                  </select>
+                ) : (
+                  <div className="flex space-x-2">
+                    <input
+                      type="text"
+                      id="llmModel"
+                      value={llmModel}
+                      onChange={(e) => setLlmModel(e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
+                      placeholder={llmProvider === 'openrouter' ? 'anthropic/claude-3-opus' : 'llama3'}
+                    />
+                  </div>
+                )}
+                
+                {providers && providers[llmProvider] && providers[llmProvider].isLoading && (
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                    Loading available models...
+                  </p>
+                )}
               </div>
             </div>
           </div>

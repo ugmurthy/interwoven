@@ -1,28 +1,223 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router';
 import { Layout } from '../components/ui/Layout';
-import { PlusCircle, Workflow, Server, Settings, Send, Link as LinkIcon } from 'lucide-react';
+import { PlusCircle, Workflow, Server, Settings, Send, Link as LinkIcon, RefreshCw, MessageSquare, Mic, FileText } from 'lucide-react';
+import { TextInput } from '../components/input/TextInput';
+import { AudioInput } from '../components/input/AudioInput';
+import { FileInput } from '../components/input/FileInput';
+import { OutputRenderer } from '../components/output/OutputRenderer';
+import { useLLM } from '../context/LLMContext';
+import { useModelCard } from '../context/ModelCardContext';
+import { LLMRequest, Output, UsageStatistics } from '../types';
 
 export default function Home() {
-  // State for input and output
-  const [input, setInput] = useState('');
-  const [output, setOutput] = useState('');
+  // State to track if we're in the browser
+  const [isBrowser, setIsBrowser] = useState(false);
+  
+  // Use effect to set isBrowser to true after mount
+  useEffect(() => {
+    setIsBrowser(true);
+  }, []);
+  
+  // Safe access to context hooks with conditional rendering
+  const llmContext = isBrowser ? useLLM() : null;
+  const modelCardContext = isBrowser ? useModelCard() : null;
+  
+  // Get LLM service and model cards if in browser
+  const sendRequest = llmContext?.sendRequest;
+  const activeProvider = llmContext?.activeProvider || 'openrouter';
+  const providers = llmContext?.providers || { openrouter: { availableModels: [] }, ollama: { availableModels: [] } };
+  const modelCards = modelCardContext?.modelCards || [];
+  const isLoadingModelCards = modelCardContext?.isLoading || false;
+  
+  // State for input, output, and selection
+  const [inputType, setInputType] = useState<'text' | 'audio' | 'file'>('text');
+  const [textInput, setTextInput] = useState('');
+  const [audioBlob, setAudioBlob] = useState<Blob | null>(null);
+  const [audioUrl, setAudioUrl] = useState<string | null>(null);
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+  const [output, setOutput] = useState<Output | null>(null);
   const [selectedTarget, setSelectedTarget] = useState<'workflow' | 'modelCard' | null>(null);
+  const [selectedModelCardId, setSelectedModelCardId] = useState<string>('');
+  const [selectedWorkflowId, setSelectedWorkflowId] = useState<string>('');
   const [isProcessing, setIsProcessing] = useState(false);
   
+  // Force a re-render when isBrowser changes
+  const [, forceUpdate] = useState({});
+  useEffect(() => {
+    if (isBrowser) {
+      forceUpdate({});
+    }
+  }, [isBrowser]);
+  
+  // Reset selection when target changes
+  useEffect(() => {
+    if (selectedTarget === 'modelCard') {
+      setSelectedWorkflowId('');
+      if (modelCards.length > 0 && !selectedModelCardId) {
+        setSelectedModelCardId(modelCards[0].id);
+      }
+    } else if (selectedTarget === 'workflow') {
+      setSelectedModelCardId('');
+      // Would set a default workflow here if we had workflows loaded
+    }
+  }, [selectedTarget, modelCards, selectedModelCardId]);
+  
   // Handle input submission
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSubmit = async () => {
+    if (!selectedTarget || !isBrowser || !sendRequest) return;
     
-    if (!input.trim() || !selectedTarget) return;
+    // Validate input based on type
+    if (inputType === 'text' && !textInput.trim()) return;
+    if (inputType === 'audio' && !audioBlob) return;
+    if (inputType === 'file' && selectedFiles.length === 0) return;
     
     setIsProcessing(true);
     
-    // In a real implementation, this would call the appropriate service
-    setTimeout(() => {
-      setOutput(`Processed input: ${input}\nUsing: ${selectedTarget}`);
+    try {
+      if (selectedTarget === 'modelCard' && selectedModelCardId) {
+        // Find the selected model card
+        const modelCard = modelCards.find(card => card.id === selectedModelCardId);
+        
+        if (!modelCard) {
+          throw new Error('Selected model card not found');
+        }
+        
+        // Check if model supports the selected input type
+        if (inputType === 'audio' && !modelCard.capabilities.supportsAudio) {
+          throw new Error('Selected model does not support audio input');
+        }
+        
+        if (inputType === 'file' && !modelCard.capabilities.supportsFiles) {
+          throw new Error('Selected model does not support file input');
+        }
+        
+        // Prepare input based on type
+        let userInput = '';
+        
+        if (inputType === 'text') {
+          userInput = textInput;
+        } else if (inputType === 'audio') {
+          userInput = 'Audio input: Please transcribe and respond to this audio.';
+        } else if (inputType === 'file') {
+          userInput = `File input: ${selectedFiles.map(f => f.name).join(', ')}. Please analyze these files.`;
+        }
+        
+        // Create LLM request
+        // Combine system prompt and user input with a double newline separator
+        // This format is expected by the LLM adapters to extract the system prompt
+        const combinedPrompt = modelCard.systemPrompt + '\n\n' + userInput;
+        
+        console.log('Home handleSubmit - System prompt:', modelCard.systemPrompt);
+        console.log('Home handleSubmit - User input:', userInput);
+        console.log('Home handleSubmit - Input type:', inputType);
+        
+        const request: LLMRequest = {
+          provider: modelCard.llmProvider,
+          model: modelCard.llmModel,
+          prompt: combinedPrompt,
+          parameters: {},
+          files: inputType === 'file' ? selectedFiles : undefined,
+        };
+        
+        // Add parameters from model card with proper type conversion
+        modelCard.parameters.forEach(param => {
+          // Convert parameter values to the appropriate types
+          if (param.type === 'number') {
+            request.parameters[param.name] = Number(param.value);
+          } else if (param.type === 'boolean') {
+            request.parameters[param.name] = Boolean(param.value);
+          } else if (param.type === 'select' || param.type === 'string') {
+            request.parameters[param.name] = String(param.value);
+          } else {
+            // Default case
+            request.parameters[param.name] = param.value;
+          }
+        });
+        
+        console.log('Home handleSubmit - Request:', {
+          provider: request.provider,
+          model: request.model,
+          parameters: request.parameters
+        });
+        
+        // Send request to LLM service
+        const startTime = Date.now();
+        const response = await sendRequest(request);
+        const endTime = Date.now();
+        
+        // Create output
+        const usageStatistics: UsageStatistics = {
+          promptTokens: response.usage.promptTokens,
+          completionTokens: response.usage.completionTokens,
+          totalTokens: response.usage.totalTokens,
+          executionTime: endTime - startTime,
+          toolCalls: response.toolResults?.length || 0,
+        };
+        
+        setOutput({
+          id: response.id,
+          type: 'markdown',
+          content: response.content,
+          toolResponses: response.toolResults?.map(tool => ({
+            toolId: tool.toolId,
+            toolName: tool.toolId,
+            response: tool.result,
+            mcpServerId: tool.mcpServerId,
+            timestamp: new Date(),
+            status: tool.error ? 'error' : 'success',
+          })),
+          usageStatistics,
+          metadata: response.metadata,
+        });
+      } else if (selectedTarget === 'workflow' && selectedWorkflowId) {
+        // Workflow processing would go here
+        // For now, just create a placeholder output
+        
+        // Get the appropriate input based on type
+        let inputContent = '';
+        if (inputType === 'text') {
+          inputContent = textInput;
+        } else if (inputType === 'audio') {
+          inputContent = 'Audio input';
+        } else if (inputType === 'file') {
+          inputContent = `Files: ${selectedFiles.map(f => f.name).join(', ')}`;
+        }
+        
+        setOutput({
+          id: `workflow-${Date.now()}`,
+          type: 'text',
+          content: `Processed input using workflow: ${selectedWorkflowId}\n\nInput: ${inputContent}`,
+          usageStatistics: {
+            promptTokens: 0,
+            completionTokens: 0,
+            totalTokens: 0,
+            executionTime: 0,
+            toolCalls: 0,
+          },
+          metadata: {},
+        });
+      }
+    } catch (error) {
+      console.error('Error processing input:', error);
+      
+      // Create error output
+      setOutput({
+        id: `error-${Date.now()}`,
+        type: 'text',
+        content: `Error processing input: ${error instanceof Error ? error.message : String(error)}`,
+        usageStatistics: {
+          promptTokens: 0,
+          completionTokens: 0,
+          totalTokens: 0,
+          executionTime: 0,
+          toolCalls: 0,
+        },
+        metadata: {},
+      });
+    } finally {
       setIsProcessing(false);
-    }, 1500);
+    }
   };
   
   // Quick action cards
@@ -70,31 +265,117 @@ export default function Home() {
           </p>
         </div>
 
-        {/* Input/Output Section */}
-        <div className="mb-12 grid grid-cols-1 gap-6">
-          {/* Input Component */}
-          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-6">
-            <h2 className="text-xl font-semibold text-gray-800 dark:text-gray-200 mb-4">
-              Input
-            </h2>
-            
-            <form onSubmit={handleSubmit}>
+        {/* Loading State for Server-Side Rendering */}
+        {!isBrowser ? (
+          <div className="mb-12 grid grid-cols-1 gap-6">
+            <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-6">
+              <h2 className="text-xl font-semibold text-gray-800 dark:text-gray-200 mb-4">
+                Loading...
+              </h2>
+              <div className="text-center text-gray-500 dark:text-gray-400 py-8">
+                Initializing application...
+              </div>
+            </div>
+          </div>
+        ) : (
+          /* Input/Output Section - Only render on client side */
+          <div className="mb-12 grid grid-cols-1 gap-6">
+            {/* Input Component */}
+            <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-6">
+              <h2 className="text-xl font-semibold text-gray-800 dark:text-gray-200 mb-4">
+                Input
+              </h2>
+              
+              {/* Input Type Selector */}
               <div className="mb-4">
-                <textarea
-                  value={input}
-                  onChange={(e) => setInput(e.target.value)}
-                  rows={4}
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
-                  placeholder="Enter your input here..."
-                />
+                <div className="flex space-x-2 mb-4">
+                  <button
+                    type="button"
+                    onClick={() => setInputType('text')}
+                    className={`px-3 py-1.5 rounded-md flex items-center ${
+                      inputType === 'text'
+                        ? 'bg-blue-600 text-white'
+                        : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300'
+                    }`}
+                  >
+                    <MessageSquare size={16} className="mr-1" />
+                    Text
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setInputType('audio')}
+                    className={`px-3 py-1.5 rounded-md flex items-center ${
+                      inputType === 'audio'
+                        ? 'bg-blue-600 text-white'
+                        : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300'
+                    }`}
+                  >
+                    <Mic size={16} className="mr-1" />
+                    Audio
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setInputType('file')}
+                    className={`px-3 py-1.5 rounded-md flex items-center ${
+                      inputType === 'file'
+                        ? 'bg-blue-600 text-white'
+                        : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300'
+                    }`}
+                  >
+                    <FileText size={16} className="mr-1" />
+                    File
+                  </button>
+                </div>
+                
+                {/* Text Input */}
+                {inputType === 'text' && (
+                  <TextInput
+                    initialValue={textInput}
+                    onChange={setTextInput}
+                    placeholder="Enter your text input here..."
+                    rows={4}
+                  />
+                )}
+                
+                {/* Audio Input */}
+                {inputType === 'audio' && (
+                  <AudioInput
+                    onAudioCaptured={(blob, url) => {
+                      setAudioBlob(blob);
+                      setAudioUrl(url);
+                    }}
+                    onAudioFileSelected={(file) => {
+                      // Handle audio file selection
+                      const reader = new FileReader();
+                      reader.onload = (e) => {
+                        if (e.target?.result instanceof ArrayBuffer) {
+                          const blob = new Blob([e.target.result], { type: file.type });
+                          setAudioBlob(blob);
+                          const url = URL.createObjectURL(blob);
+                          setAudioUrl(url);
+                        }
+                      };
+                      reader.readAsArrayBuffer(file);
+                    }}
+                  />
+                )}
+                
+                {/* File Input */}
+                {inputType === 'file' && (
+                  <FileInput
+                    onFilesSelected={(files) => {
+                      setSelectedFiles(files);
+                    }}
+                  />
+                )}
               </div>
               
               <div className="mb-4">
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                  Connect to:
+                  Process with:
                 </label>
                 
-                <div className="flex space-x-4">
+                <div className="flex space-x-4 mb-4">
                   <button
                     type="button"
                     onClick={() => setSelectedTarget('modelCard')}
@@ -121,56 +402,102 @@ export default function Home() {
                     Workflow
                   </button>
                 </div>
+                
+                {/* Model Card Selection */}
+                {selectedTarget === 'modelCard' && (
+                  <div className="mb-4">
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                      Select Model Card:
+                    </label>
+                    
+                    {isLoadingModelCards ? (
+                      <div className="flex items-center text-sm text-gray-500 dark:text-gray-400">
+                        <RefreshCw size={14} className="mr-2 animate-spin" />
+                        Loading model cards...
+                      </div>
+                    ) : modelCards.length === 0 ? (
+                      <div className="text-sm text-gray-500 dark:text-gray-400">
+                        No model cards available. <Link to="/model-cards/new" className="text-blue-600 dark:text-blue-400 hover:underline">Create one</Link>
+                      </div>
+                    ) : (
+                      <select
+                        value={selectedModelCardId}
+                        onChange={(e) => setSelectedModelCardId(e.target.value)}
+                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
+                      >
+                        <option value="">Select a model card</option>
+                        {modelCards.map((card) => (
+                          <option key={card.id} value={card.id}>
+                            {card.name} ({card.llmProvider}/{card.llmModel})
+                          </option>
+                        ))}
+                      </select>
+                    )}
+                    
+                    {selectedModelCardId && (
+                      <div className="mt-2 text-sm text-gray-500 dark:text-gray-400">
+                        Using {activeProvider} provider with {providers[activeProvider]?.availableModels.length || 0} available models
+                      </div>
+                    )}
+                  </div>
+                )}
+                
+                {/* Workflow Selection */}
+                {selectedTarget === 'workflow' && (
+                  <div className="mb-4">
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                      Select Workflow:
+                    </label>
+                    
+                    <div className="text-sm text-gray-500 dark:text-gray-400">
+                      Workflow selection coming soon. <Link to="/workflows" className="text-blue-600 dark:text-blue-400 hover:underline">Create a workflow</Link>
+                    </div>
+                  </div>
+                )}
               </div>
               
               <div className="flex justify-end">
                 <button
-                  type="submit"
-                  disabled={!input.trim() || !selectedTarget || isProcessing}
+                  type="button"
+                  onClick={handleSubmit}
+                  disabled={
+                    (inputType === 'text' && !textInput.trim()) ||
+                    (inputType === 'audio' && !audioBlob) ||
+                    (inputType === 'file' && selectedFiles.length === 0) ||
+                    !selectedTarget ||
+                    (selectedTarget === 'modelCard' && !selectedModelCardId) ||
+                    isProcessing
+                  }
                   className={`flex items-center px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors duration-200 ${
-                    (!input.trim() || !selectedTarget || isProcessing) && 'opacity-50 cursor-not-allowed'
+                    ((inputType === 'text' && !textInput.trim()) ||
+                     (inputType === 'audio' && !audioBlob) ||
+                     (inputType === 'file' && selectedFiles.length === 0) ||
+                     !selectedTarget ||
+                     (selectedTarget === 'modelCard' && !selectedModelCardId) ||
+                     isProcessing) && 'opacity-50 cursor-not-allowed'
                   }`}
                 >
                   {isProcessing ? 'Processing...' : 'Process'}
                   <Send size={18} className="ml-2" />
                 </button>
               </div>
-            </form>
-          </div>
-          
-          {/* Output Component */}
-          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-6">
-            <h2 className="text-xl font-semibold text-gray-800 dark:text-gray-200 mb-4">
-              Output
-            </h2>
+            </div>
             
+            {/* Output Component */}
             {output ? (
-              <div className="bg-gray-100 dark:bg-gray-900 rounded-md p-4 font-mono text-sm whitespace-pre-wrap">
-                {output}
-              </div>
+              <OutputRenderer output={output} />
             ) : (
-              <div className="text-center text-gray-500 dark:text-gray-400 py-8">
-                Output will appear here after processing
-              </div>
-            )}
-            
-            {output && (
-              <div className="mt-4 flex justify-end space-x-2">
-                <button
-                  className="px-3 py-1 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-md hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors duration-200 text-sm flex items-center"
-                >
-                  <LinkIcon size={14} className="mr-1" />
-                  Copy
-                </button>
-                <button
-                  className="px-3 py-1 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-md hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors duration-200 text-sm"
-                >
-                  Export
-                </button>
+              <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-6">
+                <h2 className="text-xl font-semibold text-gray-800 dark:text-gray-200 mb-4">
+                  Output
+                </h2>
+                <div className="text-center text-gray-500 dark:text-gray-400 py-8">
+                  Output will appear here after processing
+                </div>
               </div>
             )}
           </div>
-        </div>
+        )}
         
         {/* Quick Actions */}
         <div className="mb-12">

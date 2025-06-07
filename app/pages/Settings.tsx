@@ -2,8 +2,10 @@ import React, { useState, useEffect } from 'react';
 import { Layout } from '../components/ui/Layout';
 import { SecretManager } from '../components/secret/SecretManager';
 import { useMCP } from '../context/MCPContext';
+import { useLLM } from '../context/LLMContext';
+import { useSecret } from '../context/SecretContext';
 import { MCPServer } from '../types';
-import { Plus, Trash2, Edit, Save, X, ToggleLeft, ToggleRight } from 'lucide-react';
+import { Plus, Trash2, Edit, Save, X, ToggleLeft, ToggleRight, RefreshCw } from 'lucide-react';
 
 export default function Settings() {
   // State to track if we're in the browser
@@ -155,8 +157,146 @@ function SettingsContent() {
     }
   };
   
+  // LLM settings
+  const {
+    providers,
+    setOpenRouterApiKey,
+    setOllamaBaseUrl,
+    refreshModels
+  } = useLLM();
+  
+  const { secrets, addSecret, updateSecret } = useSecret();
+  
+  const [openRouterApiKey, setOpenRouterApiKeyState] = useState('');
+  const [ollamaBaseUrl, setOllamaBaseUrlState] = useState('http://localhost:11434');
+  const [isRefreshingModels, setIsRefreshingModels] = useState(false);
+  
+  // Load LLM settings from secrets
+  useEffect(() => {
+    const openRouterSecret = secrets.find(secret => secret.name === 'OPENROUTER_API_KEY');
+    if (openRouterSecret) {
+      setOpenRouterApiKeyState(openRouterSecret.value);
+    }
+    
+    const ollamaSecret = secrets.find(secret => secret.name === 'OLLAMA_BASE_URL');
+    if (ollamaSecret) {
+      setOllamaBaseUrlState(ollamaSecret.value);
+    }
+  }, [secrets]);
+  
+  // Handle save OpenRouter API key
+  const handleSaveOpenRouterApiKey = async () => {
+    try {
+      const existingSecret = secrets.find(secret => secret.name === 'OPENROUTER_API_KEY');
+      
+      if (existingSecret) {
+        await updateSecret(existingSecret.id, {
+          value: openRouterApiKey,
+        });
+      } else {
+        await addSecret({
+          name: 'OPENROUTER_API_KEY',
+          value: openRouterApiKey,
+          type: 'api_key',
+          description: 'OpenRouter API Key',
+        });
+      }
+      
+      // Update the LLM service
+      setOpenRouterApiKey(openRouterApiKey);
+      
+      alert('OpenRouter API key saved successfully');
+    } catch (error) {
+      console.error('Error saving OpenRouter API key:', error);
+      alert('Failed to save OpenRouter API key');
+    }
+  };
+  
+  // Handle save Ollama base URL
+  const handleSaveOllamaBaseUrl = async () => {
+    try {
+      const existingSecret = secrets.find(secret => secret.name === 'OLLAMA_BASE_URL');
+      
+      if (existingSecret) {
+        await updateSecret(existingSecret.id, {
+          value: ollamaBaseUrl,
+        });
+      } else {
+        await addSecret({
+          name: 'OLLAMA_BASE_URL',
+          value: ollamaBaseUrl,
+          type: 'api_key',
+          description: 'Ollama Base URL',
+        });
+      }
+      
+      // Update the LLM service
+      setOllamaBaseUrl(ollamaBaseUrl);
+      
+      alert('Ollama base URL saved successfully');
+    } catch (error) {
+      console.error('Error saving Ollama base URL:', error);
+      alert('Failed to save Ollama base URL');
+    }
+  };
+  
+  // Handle refresh models
+  const handleRefreshModels = async () => {
+    setIsRefreshingModels(true);
+    
+    try {
+      await refreshModels();
+      alert('Models refreshed successfully');
+    } catch (error) {
+      console.error('Error refreshing models:', error);
+      alert('Failed to refresh models');
+    } finally {
+      setIsRefreshingModels(false);
+    }
+  };
+  
+  // Test Ollama connection specifically
+  const testOllamaConnection = async () => {
+    try {
+      console.log('Testing Ollama connection...');
+      const ollamaService = providers.ollama.service;
+      
+      // Test availability
+      console.log('Testing Ollama availability...');
+      const isAvailable = await ollamaService.isAvailable();
+      console.log('Ollama availability result:', isAvailable);
+      
+      if (isAvailable) {
+        // Test getting models
+        console.log('Testing Ollama models...');
+        const models = await ollamaService.getAvailableModels();
+        console.log('Ollama models result:', models);
+        
+        // Test simple request if models are available
+        if (models.length > 0) {
+          console.log('Testing Ollama request with model:', models[0]);
+          const response = await ollamaService.sendRequest({
+            provider: 'ollama',
+            model: models[0],
+            prompt: 'Hello, how are you?',
+            parameters: {}
+          });
+          console.log('Ollama request result:', response);
+          alert('Ollama test successful! Check console for details.');
+        } else {
+          alert('Ollama is available but no models found. Check console for details.');
+        }
+      } else {
+        alert('Ollama is not available. Check console for details.');
+      }
+    } catch (error) {
+      console.error('Ollama test error:', error);
+      alert(`Ollama test failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  };
+  
   // Tabs for different settings sections
-  const [activeTab, setActiveTab] = useState<'secrets' | 'mcp'>('secrets');
+  const [activeTab, setActiveTab] = useState<'secrets' | 'mcp' | 'llm'>('secrets');
   
   return (
     <Layout>
@@ -179,6 +319,16 @@ function SettingsContent() {
           </button>
           <button
             className={`py-2 px-4 font-medium text-sm ${
+              activeTab === 'llm'
+                ? 'text-blue-600 dark:text-blue-400 border-b-2 border-blue-600 dark:border-blue-400'
+                : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
+            }`}
+            onClick={() => setActiveTab('llm')}
+          >
+            LLM Providers
+          </button>
+          <button
+            className={`py-2 px-4 font-medium text-sm ${
               activeTab === 'mcp'
                 ? 'text-blue-600 dark:text-blue-400 border-b-2 border-blue-600 dark:border-blue-400'
                 : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
@@ -192,6 +342,178 @@ function SettingsContent() {
         {/* Secret Management */}
         {activeTab === 'secrets' && (
           <SecretManager />
+        )}
+        
+        {/* LLM Provider Settings */}
+        {activeTab === 'llm' && (
+          <div className="space-y-6">
+            <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-6">
+              <h2 className="text-xl font-semibold text-gray-800 dark:text-gray-200 mb-4">
+                LLM Provider Settings
+              </h2>
+              
+              <div className="space-y-6">
+                {/* OpenRouter Settings */}
+                <div className="p-4 border border-gray-200 dark:border-gray-700 rounded-lg">
+                  <div className="flex justify-between items-center mb-4">
+                    <h3 className="text-lg font-medium text-gray-800 dark:text-gray-200">
+                      OpenRouter
+                    </h3>
+                    <span className={`px-2 py-0.5 text-xs rounded ${
+                      providers.openrouter.isAvailable
+                        ? 'bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300'
+                        : 'bg-gray-100 dark:bg-gray-900 text-gray-700 dark:text-gray-300'
+                    }`}>
+                      {providers.openrouter.isAvailable ? 'Available' : 'Not Available'}
+                    </span>
+                  </div>
+                  
+                  <div className="space-y-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                        API Key
+                      </label>
+                      <div className="flex space-x-2">
+                        <input
+                          type="password"
+                          value={openRouterApiKey}
+                          onChange={(e) => setOpenRouterApiKeyState(e.target.value)}
+                          className="flex-1 px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
+                          placeholder="sk-or-..."
+                        />
+                        <button
+                          onClick={handleSaveOpenRouterApiKey}
+                          className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors duration-200"
+                        >
+                          Save
+                        </button>
+                      </div>
+                      <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                        Get your API key from <a href="https://openrouter.ai/keys" target="_blank" rel="noopener noreferrer" className="text-blue-600 dark:text-blue-400 hover:underline">OpenRouter</a>
+                      </p>
+                    </div>
+                    
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                        Available Models
+                      </label>
+                      <div className="flex justify-between items-center mb-2">
+                        <span className="text-sm text-gray-500 dark:text-gray-400">
+                          {providers.openrouter.availableModels.length} models available
+                        </span>
+                        <button
+                          onClick={handleRefreshModels}
+                          className="text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 text-xs flex items-center"
+                        >
+                          <RefreshCw size={12} className={`mr-1 ${isRefreshingModels ? 'animate-spin' : ''}`} />
+                          Refresh
+                        </button>
+                      </div>
+                      {providers.openrouter.availableModels.length > 0 ? (
+                        <div className="max-h-40 overflow-y-auto border border-gray-200 dark:border-gray-700 rounded-md p-2">
+                          <ul className="text-sm text-gray-700 dark:text-gray-300">
+                            {providers.openrouter.availableModels.map((model) => (
+                              <li key={model} className="py-1">
+                                {model}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      ) : (
+                        <div className="text-sm text-gray-500 dark:text-gray-400 p-2 border border-gray-200 dark:border-gray-700 rounded-md">
+                          No models available. Please check your API key and connection.
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+                
+                {/* Ollama Settings */}
+                <div className="p-4 border border-gray-200 dark:border-gray-700 rounded-lg">
+                  <div className="flex justify-between items-center mb-4">
+                    <h3 className="text-lg font-medium text-gray-800 dark:text-gray-200">
+                      Ollama
+                    </h3>
+                    <div className="flex items-center space-x-2">
+                      <span className={`px-2 py-0.5 text-xs rounded ${
+                        providers.ollama.isAvailable
+                          ? 'bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300'
+                          : 'bg-gray-100 dark:bg-gray-900 text-gray-700 dark:text-gray-300'
+                      }`}>
+                        {providers.ollama.isAvailable ? 'Available' : 'Not Available'}
+                      </span>
+                      <button
+                        onClick={testOllamaConnection}
+                        className="px-2 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700"
+                        title="Test Ollama Connection"
+                      >
+                        Test
+                      </button>
+                    </div>
+                  </div>
+                  
+                  <div className="space-y-4">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                        Base URL
+                      </label>
+                      <div className="flex space-x-2">
+                        <input
+                          type="text"
+                          value={ollamaBaseUrl}
+                          onChange={(e) => setOllamaBaseUrlState(e.target.value)}
+                          className="flex-1 px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
+                          placeholder="http://localhost:11434"
+                        />
+                        <button
+                          onClick={handleSaveOllamaBaseUrl}
+                          className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors duration-200"
+                        >
+                          Save
+                        </button>
+                      </div>
+                      <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                        Make sure Ollama is running locally or specify a remote Ollama server
+                      </p>
+                    </div>
+                    
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                        Available Models
+                      </label>
+                      <div className="flex justify-between items-center mb-2">
+                        <span className="text-sm text-gray-500 dark:text-gray-400">
+                          {providers.ollama.availableModels.length} models available
+                        </span>
+                        <button
+                          onClick={handleRefreshModels}
+                          className="text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 text-xs flex items-center"
+                        >
+                          <RefreshCw size={12} className={`mr-1 ${isRefreshingModels ? 'animate-spin' : ''}`} />
+                          Refresh
+                        </button>
+                      </div>
+                      {providers.ollama.availableModels.length > 0 ? (
+                        <div className="max-h-40 overflow-y-auto border border-gray-200 dark:border-gray-700 rounded-md p-2">
+                          <ul className="text-sm text-gray-700 dark:text-gray-300">
+                            {providers.ollama.availableModels.map((model) => (
+                              <li key={model} className="py-1">
+                                {model}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      ) : (
+                        <div className="text-sm text-gray-500 dark:text-gray-400 p-2 border border-gray-200 dark:border-gray-700 rounded-md">
+                          No models available. Please check your Ollama server.
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
         )}
         
         {/* MCP Server Management */}

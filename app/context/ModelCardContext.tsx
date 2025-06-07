@@ -29,8 +29,16 @@ export const ModelCardProvider: React.FC<ModelCardProviderProps> = ({ children, 
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Check if we're in the browser
+  const [isBrowser, setIsBrowser] = useState<boolean>(false);
+  useEffect(() => {
+    setIsBrowser(true);
+  }, []);
+  
   // Load model cards on mount and seed if needed
   useEffect(() => {
+    if (!isBrowser) return;
+    
     const initializeModelCards = async () => {
       try {
         // Seed model cards if needed
@@ -44,7 +52,7 @@ export const ModelCardProvider: React.FC<ModelCardProviderProps> = ({ children, 
     };
     
     initializeModelCards();
-  }, [modelCardService]);
+  }, [isBrowser, modelCardService]);
 
   // Refresh the list of model cards
   const refreshModelCards = async (): Promise<void> => {

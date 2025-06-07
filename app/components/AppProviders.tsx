@@ -3,6 +3,7 @@ import { WorkflowProvider } from '../context/WorkflowContext';
 import { MCPProvider } from '../context/MCPContext';
 import { SecretProvider } from '../context/SecretContext';
 import { ModelCardProvider } from '../context/ModelCardContext';
+import { LLMProvider } from '../context/LLMContext';
 import { StorageService } from '../services/storage/StorageService';
 import { LocalStorageAdapter } from '../services/storage/LocalStorageAdapter';
 import { MCPServerManager } from '../services/mcp/MCPServerManager';
@@ -47,7 +48,7 @@ export function AppProviders({ children }: AppProvidersProps) {
     setIsBrowser(true);
   }, []);
   
-  // During server-side rendering, just render children without providers
+  // During initialization, just render children without providers
   if (!isBrowser) {
     return <>{children}</>;
   }
@@ -56,13 +57,15 @@ export function AppProviders({ children }: AppProvidersProps) {
   if (services.storageService && services.mcpClientService && services.secretService && services.modelCardService) {
     return (
       <SecretProvider secretService={services.secretService}>
-        <MCPProvider mcpClientService={services.mcpClientService}>
-          <ModelCardProvider modelCardService={services.modelCardService}>
-            <WorkflowProvider storageService={services.storageService}>
-              {children}
-            </WorkflowProvider>
-          </ModelCardProvider>
-        </MCPProvider>
+        <LLMProvider>
+          <MCPProvider mcpClientService={services.mcpClientService}>
+            <ModelCardProvider modelCardService={services.modelCardService}>
+              <WorkflowProvider storageService={services.storageService}>
+                {children}
+              </WorkflowProvider>
+            </ModelCardProvider>
+          </MCPProvider>
+        </LLMProvider>
       </SecretProvider>
     );
   }

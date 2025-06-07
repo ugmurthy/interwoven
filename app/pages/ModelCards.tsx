@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router';
 import { Layout } from '../components/ui/Layout';
 import { ModelCard as ModelCardComponent } from '../components/model-card/ModelCard';
@@ -9,12 +9,38 @@ import { ModelCardServiceImpl } from '../services/model-card/ModelCardService';
 import { LocalStorageAdapter } from '../services/storage/LocalStorageAdapter';
 
 export default function ModelCards() {
-  const { modelCards, isLoading, error, deleteModelCard, refreshModelCards } = useModelCard();
+  // State to track if we're in the browser
+  const [isBrowser, setIsBrowser] = useState(false);
+  
+  // Initialize on mount (client-side only)
+  useEffect(() => {
+    setIsBrowser(true);
+  }, []);
+  
+  // Force a re-render when isBrowser changes
+  const [, forceUpdate] = useState({});
+  useEffect(() => {
+    if (isBrowser) {
+      forceUpdate({});
+    }
+  }, [isBrowser]);
+  
+  // Safe access to context hooks with conditional rendering
+  const modelCardContext = isBrowser ? useModelCard() : null;
   const navigate = useNavigate();
   const [isReseeding, setIsReseeding] = useState(false);
   
+  // Extract values from context if available
+  const modelCards = modelCardContext?.modelCards || [];
+  const isLoading = modelCardContext?.isLoading || false;
+  const error = modelCardContext?.error || null;
+  const deleteModelCard = modelCardContext?.deleteModelCard;
+  const refreshModelCards = modelCardContext?.refreshModelCards;
+  
   // Function to reset model cards (for testing purposes)
   const handleResetModelCards = async () => {
+    if (!isBrowser || !refreshModelCards) return;
+    
     if (!window.confirm('Are you sure you want to reset all model cards? This will delete all existing cards and create new ones.')) {
       return;
     }
@@ -40,11 +66,15 @@ export default function ModelCards() {
   };
   
   const handleEditModelCard = (id: string) => {
+    if (!isBrowser) return;
+    
     // Navigate to edit page using the navigate function
     navigate(`/model-cards/${id}`);
   };
   
   const handleDeleteModelCard = (id: string) => {
+    if (!isBrowser || !deleteModelCard) return;
+    
     if (window.confirm('Are you sure you want to delete this model card?')) {
       deleteModelCard(id).catch(err => {
         console.error('Error deleting model card:', err);
@@ -54,6 +84,8 @@ export default function ModelCards() {
   };
   
   const handleConnectModelCard = (id: string) => {
+    if (!isBrowser) return;
+    
     // Navigate to workflow editor
     navigate(`/workflows?modelCardId=${id}`);
   };
