@@ -427,6 +427,7 @@ interface LLMRequest {
   parameters: Record<string, any>;
   tools?: Tool[];
   files?: File[];
+  stream: boolean;
 }
 
 interface LLMResponse {

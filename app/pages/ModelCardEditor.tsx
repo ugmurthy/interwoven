@@ -1,117 +1,237 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router';
 import { Layout } from '../components/ui/Layout';
-import { ModelCard, ModelCapabilities } from '../types';
-import { Save, ArrowLeft } from 'lucide-react';
-
-// Mock data for demonstration
-const mockModelCard: ModelCard = {
-  id: '1',
-  name: 'Text Summarizer',
-  description: 'Summarizes long text into concise paragraphs',
-  systemPrompt: 'You are a helpful assistant that summarizes text.',
-  parameters: [
-    { id: '1', name: 'Length', type: 'number', value: 100 },
-    { id: '2', name: 'Style', type: 'select', value: 'concise', options: ['concise', 'detailed', 'bullet-points'] },
-  ],
-  inputConnections: [],
-  outputConnections: [],
-  llmProvider: 'openrouter',
-  llmModel: 'anthropic/claude-3-opus',
-  capabilities: {
-    supportsImages: true,
-    supportsAudio: false,
-    supportsFiles: true,
-    supportsTools: true,
-    supportedToolTypes: ['web-search', 'calculator'],
-  },
-  mcpServers: [],
-  settings: {
-    temperature: 0.7,
-    maxTokens: 1000,
-  },
-  createdAt: new Date('2025-05-01'),
-  updatedAt: new Date('2025-05-15'),
-};
+import { ArrowLeft, Save } from 'lucide-react';
+import { ModelCard, ModelCapabilities, Parameter } from '../types';
+import { v4 as uuidv4 } from 'uuid';
+import { ModelCardConnector } from '../components/model-card/ModelCardConnector';
+import { MCPServerConnector } from '../components/mcp/MCPServerConnector';
+import { useModelCard } from '../context/ModelCardContext';
 
 export default function ModelCardEditor() {
-  const { id } = useParams<{ id: string }>();
+  const params = useParams();
+  // Check if we're on the "new" route or editing an existing card
+  const modelCardId = params.id === "model-card-new" ? null : params.id;
   const navigate = useNavigate();
-  const isNewModelCard = !id || id === 'new';
   
-  const [formData, setFormData] = useState<Partial<ModelCard>>({
-    name: '',
-    description: '',
-    systemPrompt: '',
-    parameters: [],
-    llmProvider: 'openrouter',
-    llmModel: '',
-    capabilities: {
-      supportsImages: false,
-      supportsAudio: false,
-      supportsFiles: false,
-      supportsTools: false,
-      supportedToolTypes: [],
-    } as ModelCapabilities, // Type assertion to ensure it matches the required interface
-    mcpServers: [],
-    settings: {},
+  const {
+    modelCards,
+    getModelCard,
+    createModelCard,
+    updateModelCard,
+    isLoading: isServiceLoading
+  } = useModelCard();
+  
+  // State for the model card being edited
+  const [modelCard, setModelCard] = useState<ModelCard | null>(null);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
+  
+  // State for form fields
+  const [name, setName] = useState('');
+  const [description, setDescription] = useState('');
+  const [systemPrompt, setSystemPrompt] = useState('');
+  const [llmProvider, setLlmProvider] = useState<'openrouter' | 'ollama'>('openrouter');
+  const [llmModel, setLlmModel] = useState('');
+  const [parameters, setParameters] = useState<Parameter[]>([]);
+  const [capabilities, setCapabilities] = useState<ModelCapabilities>({
+    supportsImages: false,
+    supportsAudio: false,
+    supportsFiles: false,
+    supportsTools: false,
+    supportedToolTypes: [],
   });
   
-  // Load model card data if editing an existing one
+  // State for new parameter form
+  const [newParamName, setNewParamName] = useState('');
+  const [newParamType, setNewParamType] = useState<Parameter['type']>('string');
+  const [newParamValue, setNewParamValue] = useState('');
+  const [newParamDescription, setNewParamDescription] = useState('');
+  const [newParamOptions, setNewParamOptions] = useState('');
+  
+  // State for connections
+  const [connections, setConnections] = useState<{
+    id: string;
+    sourceId: string;
+    targetId: string;
+    type: 'model-to-model' | 'input-to-model' | 'model-to-output';
+  }[]>([]);
+  
+  // Load model card data on mount
   useEffect(() => {
-    if (!isNewModelCard) {
-      // In a real implementation, this would fetch from a service
-      setFormData(mockModelCard);
-    }
-  }, [isNewModelCard]);
-  
-  // Handle form input changes
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
-    const { name, value } = e.target;
-    setFormData({ ...formData, [name]: value });
-  };
-  
-  // Handle capability toggle
-  const handleCapabilityToggle = (capability: keyof ModelCapabilities) => {
-    if (capability === 'supportedToolTypes') return;
-    
-    const updatedCapabilities: ModelCapabilities = {
-      supportsImages: formData.capabilities?.supportsImages || false,
-      supportsAudio: formData.capabilities?.supportsAudio || false,
-      supportsFiles: formData.capabilities?.supportsFiles || false,
-      supportsTools: formData.capabilities?.supportsTools || false,
-      supportedToolTypes: formData.capabilities?.supportedToolTypes || [],
+    const loadModelCard = async () => {
+      setIsLoading(true);
+      
+      if (modelCardId) {
+        try {
+          const card = await getModelCard(modelCardId);
+          
+          if (card) {
+            setModelCard(card);
+            setName(card.name);
+            setDescription(card.description);
+            setSystemPrompt(card.systemPrompt);
+            setLlmProvider(card.llmProvider);
+            setLlmModel(card.llmModel);
+            setParameters(card.parameters);
+            setCapabilities(card.capabilities);
+            setConnections([...card.inputConnections, ...card.outputConnections]);
+          } else {
+            // Model card not found, create a new one
+            createNewModelCard();
+          }
+        } catch (error) {
+          console.error('Error loading model card:', error);
+          // If there's an error, create a new model card
+          createNewModelCard();
+        }
+      } else {
+        // No ID provided, create a new model card
+        createNewModelCard();
+      }
+      
+      setIsLoading(false);
     };
     
-    updatedCapabilities[capability] = !updatedCapabilities[capability];
+    loadModelCard();
+  }, [modelCardId, getModelCard]);
+  
+  // Create a new model card
+  const createNewModelCard = () => {
+    const newCard: ModelCard = {
+      id: uuidv4(),
+      name: 'New Model Card',
+      description: '',
+      systemPrompt: '',
+      parameters: [],
+      inputConnections: [],
+      outputConnections: [],
+      llmProvider: 'openrouter',
+      llmModel: '',
+      capabilities: {
+        supportsImages: false,
+        supportsAudio: false,
+        supportsFiles: false,
+        supportsTools: false,
+        supportedToolTypes: [],
+      },
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
     
-    setFormData({
-      ...formData,
-      capabilities: updatedCapabilities,
+    setModelCard(newCard);
+    setName(newCard.name);
+    setDescription(newCard.description);
+    setSystemPrompt(newCard.systemPrompt);
+    setLlmProvider(newCard.llmProvider);
+    setLlmModel(newCard.llmModel);
+    setParameters(newCard.parameters);
+    setCapabilities(newCard.capabilities);
+    setConnections([]);
+  };
+  
+  // Handle save model card
+  const handleSaveModelCard = async () => {
+    if (!modelCard) return;
+    
+    try {
+      const updatedCardData = {
+        name,
+        description,
+        systemPrompt,
+        llmProvider,
+        llmModel,
+        parameters,
+        capabilities,
+        inputConnections: connections.filter(conn => conn.targetId === modelCard.id),
+        outputConnections: connections.filter(conn => conn.sourceId === modelCard.id),
+      };
+      
+      if (modelCardId) {
+        // Update existing model card
+        await updateModelCard(modelCardId, updatedCardData);
+      } else {
+        // Create new model card
+        await createModelCard(updatedCardData as Omit<ModelCard, 'id' | 'createdAt' | 'updatedAt'>);
+      }
+      
+      // Navigate back to the model cards list
+      navigate('/model-cards');
+    } catch (error) {
+      console.error('Error saving model card:', error);
+      alert('Failed to save model card');
+    }
+  };
+  
+  // Handle add parameter
+  const handleAddParameter = () => {
+    if (!newParamName) return;
+    
+    const newParam: Parameter = {
+      id: uuidv4(),
+      name: newParamName,
+      type: newParamType,
+      value: newParamValue,
+      description: newParamDescription || undefined,
+    };
+    
+    if (newParamType === 'select' && newParamOptions) {
+      newParam.options = newParamOptions.split(',').map(opt => opt.trim());
+    }
+    
+    setParameters([...parameters, newParam]);
+    
+    // Reset form
+    setNewParamName('');
+    setNewParamType('string');
+    setNewParamValue('');
+    setNewParamDescription('');
+    setNewParamOptions('');
+  };
+  
+  // Handle remove parameter
+  const handleRemoveParameter = (id: string) => {
+    setParameters(parameters.filter(param => param.id !== id));
+  };
+  
+  // Handle connect model cards
+  const handleConnect = (sourceId: string, targetId: string, type: 'model-to-model' | 'input-to-model' | 'model-to-output') => {
+    const newConnection = {
+      id: uuidv4(),
+      sourceId,
+      targetId,
+      type,
+    };
+    
+    setConnections([...connections, newConnection]);
+  };
+  
+  // Handle disconnect model cards
+  const handleDisconnect = (connectionId: string) => {
+    setConnections(connections.filter(conn => conn.id !== connectionId));
+  };
+  
+  // Handle update model card
+  const handleUpdateModelCard = (updates: Partial<ModelCard>) => {
+    if (!modelCard) return;
+    
+    setModelCard({
+      ...modelCard,
+      ...updates,
     });
   };
   
-  // Handle settings changes
-  const handleSettingsChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    try {
-      const settings = JSON.parse(e.target.value);
-      setFormData({ ...formData, settings });
-    } catch (error) {
-      // Invalid JSON, but we'll let the user continue typing
-      console.warn('Invalid JSON in settings field');
-    }
-  };
+  // Tabs for different sections
+  const [activeTab, setActiveTab] = useState<'basic' | 'parameters' | 'capabilities' | 'connections' | 'mcp'>('basic');
   
-  // Handle form submission
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    
-    // In a real implementation, this would save to a service
-    console.log('Saving model card:', formData);
-    
-    // Navigate back to model cards list
-    navigate('/model-cards');
-  };
+  if (isLoading || isServiceLoading || !modelCard) {
+    return (
+      <Layout>
+        <div className="max-w-4xl mx-auto p-4">
+          <p>Loading...</p>
+        </div>
+      </Layout>
+    );
+  }
   
   return (
     <Layout>
@@ -125,200 +245,399 @@ export default function ModelCardEditor() {
             <ArrowLeft size={20} className="text-gray-600 dark:text-gray-400" />
           </button>
           <h1 className="text-2xl font-bold text-gray-900 dark:text-white">
-            {isNewModelCard ? 'Create Model Card' : 'Edit Model Card'}
+            {modelCardId ? 'Edit Model Card' : 'New Model Card'}
           </h1>
+          
+          <button
+            onClick={handleSaveModelCard}
+            className="ml-auto flex items-center px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors duration-200"
+          >
+            <Save size={18} className="mr-2" />
+            Save
+          </button>
         </div>
         
-        <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-6">
-          <form onSubmit={handleSubmit}>
-            {/* Basic Information */}
-            <div className="mb-6">
-              <h2 className="text-xl font-semibold text-gray-800 dark:text-gray-200 mb-4">
-                Basic Information
-              </h2>
-              
-              <div className="mb-4">
+        {/* Tabs */}
+        <div className="flex border-b border-gray-200 dark:border-gray-700 mb-6">
+          <button
+            className={`py-2 px-4 font-medium text-sm ${
+              activeTab === 'basic'
+                ? 'text-blue-600 dark:text-blue-400 border-b-2 border-blue-600 dark:border-blue-400'
+                : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
+            }`}
+            onClick={() => setActiveTab('basic')}
+          >
+            Basic Info
+          </button>
+          <button
+            className={`py-2 px-4 font-medium text-sm ${
+              activeTab === 'parameters'
+                ? 'text-blue-600 dark:text-blue-400 border-b-2 border-blue-600 dark:border-blue-400'
+                : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
+            }`}
+            onClick={() => setActiveTab('parameters')}
+          >
+            Parameters
+          </button>
+          <button
+            className={`py-2 px-4 font-medium text-sm ${
+              activeTab === 'capabilities'
+                ? 'text-blue-600 dark:text-blue-400 border-b-2 border-blue-600 dark:border-blue-400'
+                : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
+            }`}
+            onClick={() => setActiveTab('capabilities')}
+          >
+            Capabilities
+          </button>
+          <button
+            className={`py-2 px-4 font-medium text-sm ${
+              activeTab === 'connections'
+                ? 'text-blue-600 dark:text-blue-400 border-b-2 border-blue-600 dark:border-blue-400'
+                : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
+            }`}
+            onClick={() => setActiveTab('connections')}
+          >
+            Connections
+          </button>
+          <button
+            className={`py-2 px-4 font-medium text-sm ${
+              activeTab === 'mcp'
+                ? 'text-blue-600 dark:text-blue-400 border-b-2 border-blue-600 dark:border-blue-400'
+                : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
+            }`}
+            onClick={() => setActiveTab('mcp')}
+          >
+            MCP Integration
+          </button>
+        </div>
+        
+        {/* Basic Info Tab */}
+        {activeTab === 'basic' && (
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-6">
+            <div className="space-y-4">
+              <div>
                 <label htmlFor="name" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                   Name
                 </label>
                 <input
                   type="text"
                   id="name"
-                  name="name"
-                  value={formData.name}
-                  onChange={handleInputChange}
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
                   className="w-full px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
-                  required
+                  placeholder="Model Card Name"
                 />
               </div>
               
-              <div className="mb-4">
+              <div>
                 <label htmlFor="description" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                   Description
                 </label>
                 <textarea
                   id="description"
-                  name="description"
-                  value={formData.description}
-                  onChange={handleInputChange}
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
                   rows={3}
                   className="w-full px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
-                  required
+                  placeholder="Describe what this model card does"
                 />
               </div>
-            </div>
-            
-            {/* LLM Configuration */}
-            <div className="mb-6">
-              <h2 className="text-xl font-semibold text-gray-800 dark:text-gray-200 mb-4">
-                LLM Configuration
-              </h2>
               
-              <div className="mb-4">
+              <div>
+                <label htmlFor="systemPrompt" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  System Prompt
+                </label>
+                <textarea
+                  id="systemPrompt"
+                  value={systemPrompt}
+                  onChange={(e) => setSystemPrompt(e.target.value)}
+                  rows={5}
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
+                  placeholder="Enter the system prompt for this model"
+                />
+              </div>
+              
+              <div>
                 <label htmlFor="llmProvider" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                  Provider
+                  LLM Provider
                 </label>
                 <select
                   id="llmProvider"
-                  name="llmProvider"
-                  value={formData.llmProvider}
-                  onChange={handleInputChange}
+                  value={llmProvider}
+                  onChange={(e) => setLlmProvider(e.target.value as 'openrouter' | 'ollama')}
                   className="w-full px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
-                  required
                 >
                   <option value="openrouter">OpenRouter</option>
                   <option value="ollama">Ollama</option>
                 </select>
               </div>
               
-              <div className="mb-4">
+              <div>
                 <label htmlFor="llmModel" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                  Model
+                  LLM Model
                 </label>
                 <input
                   type="text"
                   id="llmModel"
-                  name="llmModel"
-                  value={formData.llmModel}
-                  onChange={handleInputChange}
+                  value={llmModel}
+                  onChange={(e) => setLlmModel(e.target.value)}
                   className="w-full px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
-                  required
+                  placeholder={llmProvider === 'openrouter' ? 'anthropic/claude-3-opus' : 'llama3'}
                 />
               </div>
             </div>
+          </div>
+        )}
+        
+        {/* Parameters Tab */}
+        {activeTab === 'parameters' && (
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-6">
+            <h2 className="text-lg font-semibold text-gray-800 dark:text-gray-200 mb-4">
+              Parameters
+            </h2>
             
-            {/* Capabilities */}
-            <div className="mb-6">
-              <h2 className="text-xl font-semibold text-gray-800 dark:text-gray-200 mb-4">
-                Capabilities
-              </h2>
+            {/* Add Parameter Form */}
+            <div className="mb-6 p-4 border border-gray-200 dark:border-gray-700 rounded-lg">
+              <h3 className="text-md font-medium text-gray-800 dark:text-gray-200 mb-4">
+                Add Parameter
+              </h3>
               
-              <div className="grid grid-cols-2 gap-4">
-                <div className="flex items-center">
-                  <input
-                    type="checkbox"
-                    id="supportsImages"
-                    checked={formData.capabilities?.supportsImages || false}
-                    onChange={() => handleCapabilityToggle('supportsImages')}
-                    className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
-                  />
-                  <label htmlFor="supportsImages" className="ml-2 block text-sm text-gray-700 dark:text-gray-300">
-                    Supports Images
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                    Name
                   </label>
+                  <input
+                    type="text"
+                    value={newParamName}
+                    onChange={(e) => setNewParamName(e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
+                    placeholder="temperature"
+                  />
                 </div>
                 
-                <div className="flex items-center">
-                  <input
-                    type="checkbox"
-                    id="supportsAudio"
-                    checked={formData.capabilities?.supportsAudio || false}
-                    onChange={() => handleCapabilityToggle('supportsAudio')}
-                    className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
-                  />
-                  <label htmlFor="supportsAudio" className="ml-2 block text-sm text-gray-700 dark:text-gray-300">
-                    Supports Audio
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                    Type
                   </label>
+                  <select
+                    value={newParamType}
+                    onChange={(e) => setNewParamType(e.target.value as Parameter['type'])}
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
+                  >
+                    <option value="string">String</option>
+                    <option value="number">Number</option>
+                    <option value="boolean">Boolean</option>
+                    <option value="select">Select</option>
+                  </select>
                 </div>
                 
-                <div className="flex items-center">
-                  <input
-                    type="checkbox"
-                    id="supportsFiles"
-                    checked={formData.capabilities?.supportsFiles || false}
-                    onChange={() => handleCapabilityToggle('supportsFiles')}
-                    className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
-                  />
-                  <label htmlFor="supportsFiles" className="ml-2 block text-sm text-gray-700 dark:text-gray-300">
-                    Supports Files
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                    Default Value
                   </label>
+                  <input
+                    type="text"
+                    value={newParamValue}
+                    onChange={(e) => setNewParamValue(e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
+                    placeholder="0.7"
+                  />
                 </div>
                 
-                <div className="flex items-center">
-                  <input
-                    type="checkbox"
-                    id="supportsTools"
-                    checked={formData.capabilities?.supportsTools || false}
-                    onChange={() => handleCapabilityToggle('supportsTools')}
-                    className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
-                  />
-                  <label htmlFor="supportsTools" className="ml-2 block text-sm text-gray-700 dark:text-gray-300">
-                    Supports Tools
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                    Description
                   </label>
+                  <input
+                    type="text"
+                    value={newParamDescription}
+                    onChange={(e) => setNewParamDescription(e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
+                    placeholder="Controls randomness"
+                  />
                 </div>
+                
+                {newParamType === 'select' && (
+                  <div className="col-span-2">
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                      Options (comma-separated)
+                    </label>
+                    <input
+                      type="text"
+                      value={newParamOptions}
+                      onChange={(e) => setNewParamOptions(e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
+                      placeholder="option1, option2, option3"
+                    />
+                  </div>
+                )}
+              </div>
+              
+              <div className="flex justify-end">
+                <button
+                  onClick={handleAddParameter}
+                  disabled={!newParamName}
+                  className={`px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors duration-200 ${
+                    !newParamName && 'opacity-50 cursor-not-allowed'
+                  }`}
+                >
+                  Add Parameter
+                </button>
               </div>
             </div>
             
-            {/* Settings */}
-            <div className="mb-6">
-              <h2 className="text-xl font-semibold text-gray-800 dark:text-gray-200 mb-4">
-                Settings
-              </h2>
-              
-              <div className="mb-4">
-                <label htmlFor="settings" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                  Settings (JSON)
-                </label>
-                <textarea
-                  id="settings"
-                  name="settings"
-                  value={JSON.stringify(formData.settings || {}, null, 2)}
-                  onChange={handleSettingsChange}
-                  rows={5}
-                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white font-mono text-sm"
-                  placeholder="{}"
+            {/* Parameters List */}
+            {parameters.length > 0 ? (
+              <ul className="divide-y divide-gray-200 dark:divide-gray-700">
+                {parameters.map((param) => (
+                  <li key={param.id} className="py-4 flex justify-between items-start">
+                    <div>
+                      <div className="flex items-center">
+                        <h3 className="text-md font-medium text-gray-800 dark:text-gray-200">
+                          {param.name}
+                        </h3>
+                        <span className="ml-2 px-2 py-0.5 text-xs bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 rounded">
+                          {param.type}
+                        </span>
+                      </div>
+                      <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                        {param.description || 'No description'}
+                      </p>
+                      <div className="mt-1">
+                        <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Default: </span>
+                        <span className="text-sm text-gray-600 dark:text-gray-400">{param.value}</span>
+                      </div>
+                      {param.options && (
+                        <div className="mt-1">
+                          <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Options: </span>
+                          <span className="text-sm text-gray-600 dark:text-gray-400">
+                            {param.options.join(', ')}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                    <button
+                      onClick={() => handleRemoveParameter(param.id)}
+                      className="text-red-600 hover:text-red-800 dark:text-red-400 dark:hover:text-red-300"
+                    >
+                      Remove
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <div className="text-center py-8 text-gray-500 dark:text-gray-400">
+                No parameters added yet. Add parameters using the form above.
+              </div>
+            )}
+          </div>
+        )}
+        
+        {/* Capabilities Tab */}
+        {activeTab === 'capabilities' && (
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-6">
+            <h2 className="text-lg font-semibold text-gray-800 dark:text-gray-200 mb-4">
+              Model Capabilities
+            </h2>
+            
+            <div className="space-y-4">
+              <div className="flex items-center">
+                <input
+                  type="checkbox"
+                  id="supportsImages"
+                  checked={capabilities.supportsImages}
+                  onChange={(e) => setCapabilities({ ...capabilities, supportsImages: e.target.checked })}
+                  className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
                 />
-              </div>
-            </div>
-            
-            {/* MCP Servers */}
-            <div className="mb-6">
-              <h2 className="text-xl font-semibold text-gray-800 dark:text-gray-200 mb-4">
-                MCP Servers
-              </h2>
-              
-              <div className="mb-4">
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                  Connected MCP Servers
+                <label htmlFor="supportsImages" className="ml-2 block text-sm text-gray-700 dark:text-gray-300">
+                  Supports Images
                 </label>
-                {/* This would be a multi-select component in a real implementation */}
-                <div className="border border-gray-300 dark:border-gray-700 rounded-md p-4 text-gray-500 dark:text-gray-400">
-                  MCP Server selection would go here
-                </div>
               </div>
+              
+              <div className="flex items-center">
+                <input
+                  type="checkbox"
+                  id="supportsAudio"
+                  checked={capabilities.supportsAudio}
+                  onChange={(e) => setCapabilities({ ...capabilities, supportsAudio: e.target.checked })}
+                  className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                />
+                <label htmlFor="supportsAudio" className="ml-2 block text-sm text-gray-700 dark:text-gray-300">
+                  Supports Audio
+                </label>
+              </div>
+              
+              <div className="flex items-center">
+                <input
+                  type="checkbox"
+                  id="supportsFiles"
+                  checked={capabilities.supportsFiles}
+                  onChange={(e) => setCapabilities({ ...capabilities, supportsFiles: e.target.checked })}
+                  className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                />
+                <label htmlFor="supportsFiles" className="ml-2 block text-sm text-gray-700 dark:text-gray-300">
+                  Supports Files
+                </label>
+              </div>
+              
+              <div className="flex items-center">
+                <input
+                  type="checkbox"
+                  id="supportsTools"
+                  checked={capabilities.supportsTools}
+                  onChange={(e) => setCapabilities({ ...capabilities, supportsTools: e.target.checked })}
+                  className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                />
+                <label htmlFor="supportsTools" className="ml-2 block text-sm text-gray-700 dark:text-gray-300">
+                  Supports Tools
+                </label>
+              </div>
+              
+              {capabilities.supportsTools && (
+                <div>
+                  <label htmlFor="supportedToolTypes" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                    Supported Tool Types (comma-separated)
+                  </label>
+                  <input
+                    type="text"
+                    id="supportedToolTypes"
+                    value={capabilities.supportedToolTypes.join(', ')}
+                    onChange={(e) => setCapabilities({
+                      ...capabilities,
+                      supportedToolTypes: e.target.value.split(',').map(type => type.trim()).filter(Boolean),
+                    })}
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:text-white"
+                    placeholder="web-search, calculator, etc."
+                  />
+                </div>
+              )}
             </div>
-            
-            {/* Submit Button */}
-            <div className="flex justify-end">
-              <button
-                type="submit"
-                className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors duration-200"
-              >
-                <Save size={18} className="mr-2" />
-                {isNewModelCard ? 'Create Model Card' : 'Save Changes'}
-              </button>
-            </div>
-          </form>
-        </div>
+          </div>
+        )}
+        
+        {/* Connections Tab */}
+        {activeTab === 'connections' && (
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-6">
+            <ModelCardConnector
+              sourceCard={modelCard}
+              availableTargets={modelCards}
+              existingConnections={connections}
+              onConnect={handleConnect}
+              onDisconnect={handleDisconnect}
+            />
+          </div>
+        )}
+        
+        {/* MCP Integration Tab */}
+        {activeTab === 'mcp' && (
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-6">
+            <MCPServerConnector
+              modelCard={modelCard}
+              onUpdateModelCard={handleUpdateModelCard}
+            />
+          </div>
+        )}
       </div>
     </Layout>
   );

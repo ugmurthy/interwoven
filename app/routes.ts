@@ -7,7 +7,12 @@ export default [
     // Use unique file paths for each route to avoid duplicate IDs
     route("model-cards/new", "pages/ModelCardEditor.tsx", { id: "model-card-new" }),
     route("model-cards/:id", "pages/ModelCardEditor.tsx", { id: "model-card-edit" }),
-    route("workflows", "pages/WorkflowEditor.tsx"),
+    
+    // Workflow routes
+    route("workflows", "pages/Workflows.tsx"),
+    route("workflows/new", "pages/WorkflowEditor.tsx", { id: "workflow-new" }),
+    route("workflows/:id", "pages/WorkflowEditor.tsx", { id: "workflow-edit" }),
+    
     route("mcp-servers", "pages/MCPServerManager.tsx"),
     route("settings", "pages/Settings.tsx"),
     
