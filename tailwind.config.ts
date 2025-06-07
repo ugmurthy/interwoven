@@ -1,5 +1,7 @@
 import type { Config } from "tailwindcss";
 
+// Use require for daisyui to avoid TypeScript import issues
+const daisyui = require("daisyui");
 export default {
   content: ["./app/**/{**,.client,.server}/**/*.{js,jsx,ts,tsx}"],
   theme: {
@@ -18,5 +20,8 @@ export default {
       },
     },
   },
-  plugins: [],
+  plugins: [daisyui],
+  daisyui: {
+    themes: ["light", "dark"],
+  },
 } satisfies Config;
