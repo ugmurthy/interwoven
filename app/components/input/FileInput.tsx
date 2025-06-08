@@ -33,6 +33,14 @@ export function FileInput({
   // Helper function to read file content
   const readFileContent = (file: File): Promise<string> => {
     return new Promise((resolve, reject) => {
+      // Check if file is PDF
+      if (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')) {
+        return extractPdfText(file)
+          .then(resolve)
+          .catch(reject);
+      }
+      
+      // Handle text files as before
       const reader = new FileReader();
       reader.onload = (event) => {
         if (event.target?.result) {
@@ -45,14 +53,83 @@ export function FileInput({
       reader.readAsText(file);
     });
   };
+  
+  // Function to extract text from PDF files
+  const extractPdfText = async (file: File): Promise<string> => {
+    try {
+      // Import PDF.js dynamically to avoid SSR issues
+      const pdfjsLib = await import('pdfjs-dist');
+      
+      // Set worker source - use CDN for worker to avoid build issues
+      pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
+      
+      // Read the file as ArrayBuffer
+      const arrayBuffer = await new Promise<ArrayBuffer>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          if (e.target?.result instanceof ArrayBuffer) {
+            resolve(e.target.result);
+          } else {
+            reject(new Error('Failed to read PDF as ArrayBuffer'));
+          }
+        };
+        reader.onerror = () => reject(new Error('Error reading PDF file'));
+        reader.readAsArrayBuffer(file);
+      });
+      
+      // Load the PDF document
+      const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+      console.log(`PDF loaded: ${file.name}, pages: ${pdf.numPages}`);
+      
+      // Extract text from each page
+      let text = '';
+      const maxPages = Math.min(pdf.numPages, 50); // Limit to 50 pages for performance
+      
+      for (let i = 1; i <= maxPages; i++) {
+        const page = await pdf.getPage(i);
+        const content = await page.getTextContent();
+        const pageText = content.items
+          .map((item: any) => item.str)
+          .join(' ');
+        
+        text += `[Page ${i}]\n${pageText}\n\n`;
+        
+        // Add a note if we're limiting the pages
+        if (i === maxPages && maxPages < pdf.numPages) {
+          text += `[Note: Only showing ${maxPages} of ${pdf.numPages} pages due to size limitations]\n`;
+        }
+      }
+      
+      return text;
+    } catch (error) {
+      console.error('PDF extraction error:', error);
+      throw new Error(`PDF extraction error: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  };
 
   // Check if file is a text-based file that we should extract content from
   const isTextFile = (file: File): boolean => {
-    const textTypes = ['text/plain', 'text/markdown', 'application/json', 'text/html', 'text/css', 'text/javascript'];
-    return textTypes.includes(file.type) ||
-           file.name.endsWith('.txt') ||
-           file.name.endsWith('.md') ||
-           file.name.endsWith('.json');
+    const textTypes = [
+      'text/plain',
+      'text/markdown',
+      'application/json',
+      'text/html',
+      'text/css',
+      'text/javascript',
+      'application/pdf'  // Add PDF MIME type
+    ];
+    
+    // Check by MIME type
+    if (textTypes.includes(file.type)) {
+      return true;
+    }
+    
+    // Check by file extension (case-insensitive)
+    const fileName = file.name.toLowerCase();
+    return fileName.endsWith('.txt') ||
+           fileName.endsWith('.md') ||
+           fileName.endsWith('.json') ||
+           fileName.endsWith('.pdf');  // Add PDF extension
   };
 
   const onDrop = useCallback(

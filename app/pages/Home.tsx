@@ -134,6 +134,7 @@ export default function Home() {
     }
     
     setIsProcessing(true);
+    setOutput(null); // Clear previous output
     
     try {
       if (selectedTarget === 'modelCard' && selectedModelCardId) {
@@ -157,7 +158,36 @@ export default function Home() {
         let userInput = '';
         
         if (inputType === 'text') {
-          userInput = textInput;
+          // Check if text input contains URLs and process them
+          if (textInput.match(/(https?:\/\/[^\s]+)/g)) {
+            try {
+              // Show loading state for URL processing
+              setOutput({
+                id: `processing-${Date.now()}`,
+                type: 'text',
+                content: 'Processing URLs in your input...',
+                usageStatistics: {
+                  promptTokens: 0,
+                  completionTokens: 0,
+                  totalTokens: 0,
+                  executionTime: 0,
+                  toolCalls: 0,
+                },
+                metadata: {},
+              });
+              
+              // Import and use the URL content extractor
+              const { extractUrlContent } = await import('../utils/urlContentExtractor');
+              userInput = await extractUrlContent(textInput);
+              console.log('Processed input with URL content extraction');
+            } catch (error) {
+              console.error('Error processing URLs:', error);
+              userInput = textInput + '\n\n[Error processing URLs: ' +
+                (error instanceof Error ? error.message : String(error)) + ']';
+            }
+          } else {
+            userInput = textInput;
+          }
         } else if (inputType === 'audio') {
           userInput = 'Audio input: Please transcribe and respond to this audio.';
         } else if (inputType === 'file') {
