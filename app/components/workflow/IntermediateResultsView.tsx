@@ -32,9 +32,9 @@ export function IntermediateResultsView({
       setExpandedSections(prev => ({
         ...prev,
         [modelId]: {
-          input: true,
+          input: false, // Now collapsed by default
           systemPrompt: false, // System prompt is hidden by default
-          output: true,
+          output: false, // Now collapsed by default
           usage: false // Usage is collapsed by default
         }
       }));
@@ -47,9 +47,9 @@ export function IntermediateResultsView({
       ...prev,
       [modelId]: {
         ...(prev[modelId] || {
-          input: true,
+          input: false,
           systemPrompt: false,
-          output: true,
+          output: false,
           usage: false
         }),
         [section]: !(prev[modelId]?.[section] ?? false)
