@@ -67,6 +67,7 @@ export default function Home() {
   
   // Reset session function
   const resetSession = () => {
+    
     setTextInput('');
     setAudioBlob(null);
     setAudioUrl(null);
@@ -85,7 +86,7 @@ export default function Home() {
     if (modelCards.length > 0 && selectedTarget === 'modelCard') {
       setSelectedModelCardId(modelCards[0].id);
     }
-  }, [modelCards, selectedTarget]);
+ }, [modelCards, selectedTarget]);
   
   useEffect(() => {
     if (workflows.length > 0 && selectedTarget === 'workflow') {
@@ -95,6 +96,7 @@ export default function Home() {
   
   // Reset selection when target changes (treat as new session)
   useEffect(() => {
+    
     if (selectedTarget === 'modelCard') {
       setSelectedWorkflowId('');
       // Always set a default model card if available
@@ -363,7 +365,18 @@ export default function Home() {
                 
                   <button
                     type="button"
-                    onClick={() => setSelectedTarget('modelCard')}
+                    onClick={() => {
+                      // Clear input first before changing target
+                      setTextInput('');
+                      setAudioBlob(null);
+                      setAudioUrl(null);
+                      setSelectedFiles([]);
+                      setOutput(null);
+                      setIsProcessing(false);
+                      
+                      // Then change the target
+                      setSelectedTarget('modelCard');
+                    }}
                     className={`px-4 py-2 rounded-md flex items-center ${
                       selectedTarget === 'modelCard'
                         ? 'bg-blue-600 text-white'
@@ -376,7 +389,18 @@ export default function Home() {
                   
                   <button
                     type="button"
-                    onClick={() => setSelectedTarget('workflow')}
+                    onClick={() => {
+                      // Clear input first before changing target
+                      setTextInput('');
+                      setAudioBlob(null);
+                      setAudioUrl(null);
+                      setSelectedFiles([]);
+                      setOutput(null);
+                      setIsProcessing(false);
+                      
+                      // Then change the target
+                      setSelectedTarget('workflow');
+                    }}
                     className={`px-4 py-2 rounded-md flex items-center ${
                       selectedTarget === 'workflow'
                         ? 'bg-purple-600 text-white'
