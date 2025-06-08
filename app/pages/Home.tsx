@@ -315,9 +315,9 @@ export default function Home() {
     },
     {
       title: 'MCP Servers',
-      description: 'Configure and manage MCP servers',
+      description: 'Coming soon',
       icon: <Server size={24} className="text-green-600 dark:text-green-400" />,
-      link: '/mcp-servers',
+      link: '/',
       color: 'bg-green-50 dark:bg-green-900/20',
     },
     {

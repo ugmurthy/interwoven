@@ -18,16 +18,16 @@ export default [
     route("settings", "pages/Settings.tsx"),
     
     // Original demo routes
-    route("component", "routes/component.tsx"),
-    route("sample", "routes/sample.tsx"),
-    route("samplesplat/*", "routes/samplesplat.tsx"),
-    // routes with client loader
-    route("users/:pid", "routes/users.pid.tsx"),
-    route("/users", "routes/users.tsx"),
-    // routes with server loader
-    route("susers/:pid", "routes/susers.pid.tsx"),
-    route("/susers", "routes/susers.tsx"),
-    // posts
-    route("/posts", "routes/posts.tsx"),
-    route("/sposts", "routes/sposts.tsx")
+    // route("component", "routes/component.tsx"),
+    // route("sample", "routes/sample.tsx"),
+    // route("samplesplat/*", "routes/samplesplat.tsx"),
+    // // routes with client loader
+    // route("users/:pid", "routes/users.pid.tsx"),
+    // route("/users", "routes/users.tsx"),
+    // // routes with server loader
+    // route("susers/:pid", "routes/susers.pid.tsx"),
+    // route("/susers", "routes/susers.tsx"),
+    // // posts
+    // route("/posts", "routes/posts.tsx"),
+    // route("/sposts", "routes/sposts.tsx")
 ] satisfies RouteConfig;
