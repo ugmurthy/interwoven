@@ -9,7 +9,6 @@ export function Navigation() {
     { path: '/', label: 'Home' },
     { path: '/model-cards', label: 'Model Cards' },
     { path: '/workflows', label: 'Workflows' },
-    { path: '/mcp-servers', label: 'MCP Servers' },
     { path: '/settings', label: 'Settings' },
   ];
   

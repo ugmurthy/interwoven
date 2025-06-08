@@ -509,8 +509,7 @@ export const WorkflowProvider: React.FC<WorkflowProviderProps> = ({ children, st
         endTime: new Date() // Will be updated at the end
       };
       
-      // Sort model cards based on connections to determine execution order
-      const modelCards = [...workflow.modelCards];
+      // Determine execution order based on connections
       const executionOrder = determineExecutionOrder(workflow);
       
       if (executionOrder.length === 0) {
@@ -522,9 +521,30 @@ export const WorkflowProvider: React.FC<WorkflowProviderProps> = ({ children, st
         return card ? card.name : id;
       }));
       
-      // Execute each model card in order
-      let currentInput = input;
+      // Create a map of model inputs
+      // Initially, only the first model(s) with in-degree 0 will have the user input
+      const modelInputs: Record<string, string> = {};
       
+      // Create a map to track which models have been executed
+      const executedModels = new Set<string>();
+      
+      // Create a map of model outputs
+      const modelOutputs: Record<string, string> = {};
+      
+      // Create a map of model dependencies (which models feed into which)
+      const modelDependencies: Record<string, string[]> = {};
+      workflow.modelCards.forEach(card => {
+        modelDependencies[card.id] = [];
+      });
+      
+      // Build the dependency graph
+      workflow.connections.forEach(conn => {
+        if (conn.type === 'model-to-model') {
+          modelDependencies[conn.targetId].push(conn.sourceId);
+        }
+      });
+      
+      // Execute each model card in order
       for (const modelCardId of executionOrder) {
         const modelCard = workflow.modelCards.find(card => card.id === modelCardId);
         if (!modelCard) {
@@ -534,11 +554,30 @@ export const WorkflowProvider: React.FC<WorkflowProviderProps> = ({ children, st
         
         console.log(`Executing model card: ${modelCard.name}`);
         
+        // Determine the input for this model
+        let modelInput = input; // Default to user input
+        
+        // Check if this model has dependencies
+        const dependencies = modelDependencies[modelCardId];
+        if (dependencies.length > 0) {
+          // This model depends on other models, use their outputs as input
+          // For now, we'll concatenate the outputs of all dependencies
+          // A more sophisticated approach might be needed for complex workflows
+          const dependencyOutputs = dependencies
+            .filter(depId => executedModels.has(depId)) // Only use executed dependencies
+            .map(depId => modelOutputs[depId])
+            .join('\n\n');
+          
+          if (dependencyOutputs) {
+            modelInput = dependencyOutputs;
+          }
+        }
+        
         // Create LLM request
         const request: LLMRequest = {
           provider: modelCard.llmProvider,
           model: modelCard.llmModel,
-          prompt: `${modelCard.systemPrompt}\n\n${currentInput}`,
+          prompt: `${modelCard.systemPrompt}\n\n${modelInput}`,
           parameters: modelCard.parameters.reduce((acc, param) => {
             acc[param.name] = param.value;
             return acc;
@@ -548,8 +587,11 @@ export const WorkflowProvider: React.FC<WorkflowProviderProps> = ({ children, st
         // Send request to LLM service
         const response = await sendRequest(request);
         
-        // Update current input for next model
-        currentInput = response.content;
+        // Store this model's output
+        modelOutputs[modelCardId] = response.content;
+        
+        // Mark this model as executed
+        executedModels.add(modelCardId);
         
         // Track execution result for this model
         const modelResult: ExecutionResult = {
@@ -577,8 +619,14 @@ export const WorkflowProvider: React.FC<WorkflowProviderProps> = ({ children, st
         executionResult.totalUsageStatistics.toolCalls += response.toolResults?.length || 0;
       }
       
-      // Set final output
-      executionResult.finalOutput = currentInput;
+      // Set final output - use the output of the last model in the execution order
+      const lastModelId = executionOrder[executionOrder.length - 1];
+      if (lastModelId && modelOutputs[lastModelId]) {
+        executionResult.finalOutput = modelOutputs[lastModelId];
+      } else {
+        // Fallback if something went wrong
+        executionResult.finalOutput = "Workflow execution completed, but no final output was produced.";
+      }
       
       // Calculate total execution time
       const endTime = new Date();
@@ -621,8 +669,11 @@ export const WorkflowProvider: React.FC<WorkflowProviderProps> = ({ children, st
     // Build the graph based on connections
     workflow.connections.forEach(conn => {
       if (conn.type === 'model-to-model') {
-        graph[conn.sourceId].push(conn.targetId);
-        inDegree[conn.targetId] = (inDegree[conn.targetId] || 0) + 1;
+        // Ensure both source and target exist in the graph
+        if (graph[conn.sourceId] && graph[conn.targetId] !== undefined) {
+          graph[conn.sourceId].push(conn.targetId);
+          inDegree[conn.targetId] = (inDegree[conn.targetId] || 0) + 1;
+        }
       }
     });
     
@@ -640,19 +691,27 @@ export const WorkflowProvider: React.FC<WorkflowProviderProps> = ({ children, st
       const current = queue.shift()!;
       result.push(current);
       
-      graph[current].forEach(neighbor => {
-        inDegree[neighbor]--;
-        if (inDegree[neighbor] === 0) {
-          queue.push(neighbor);
-        }
-      });
+      if (graph[current]) {
+        graph[current].forEach(neighbor => {
+          inDegree[neighbor]--;
+          if (inDegree[neighbor] === 0) {
+            queue.push(neighbor);
+          }
+        });
+      }
     }
     
     // Check if we have a valid ordering (all nodes included)
     if (result.length !== workflow.modelCards.length) {
-      console.warn('Circular dependency detected in workflow');
-      // Fall back to original order
-      return workflow.modelCards.map(card => card.id);
+      console.warn('Incomplete execution order detected. Some models may be disconnected or have circular dependencies.');
+      
+      // Add any missing model IDs to the result
+      const includedIds = new Set(result);
+      workflow.modelCards.forEach(card => {
+        if (!includedIds.has(card.id)) {
+          result.push(card.id);
+        }
+      });
     }
     
     return result;
