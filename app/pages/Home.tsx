@@ -13,6 +13,13 @@ import { useModelCard } from '../context/ModelCardContext';
 import { useWorkflow } from '../context/WorkflowContext';
 import { LLMRequest, Output, UsageStatistics, WorkflowExecutionResult } from '../types';
 
+// Define the FileWithContent interface to match what's in FileInput.tsx
+interface FileWithContent {
+  file: File;
+  content?: string;
+  error?: string;
+}
+
 export default function Home() {
   // State to track if we're in the browser
   const [isBrowser, setIsBrowser] = useState(false);
@@ -40,7 +47,7 @@ export default function Home() {
   const [textInput, setTextInput] = useState('');
   const [audioBlob, setAudioBlob] = useState<Blob | null>(null);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
-  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+  const [selectedFiles, setSelectedFiles] = useState<FileWithContent[]>([]);
   const [output, setOutput] = useState<Output | null>(null);
   const [selectedTarget, setSelectedTarget] = useState<'workflow' | 'modelCard' | null>('modelCard'); // Default to modelCard
   const [selectedModelCardId, setSelectedModelCardId] = useState<string>('');
@@ -63,7 +70,7 @@ export default function Home() {
     setTextInput('');
     setAudioBlob(null);
     setAudioUrl(null);
-    setSelectedFiles([]);
+    setSelectedFiles([]); // This still works with the new type
     setOutput(null);
     setIsProcessing(false);
     
@@ -154,7 +161,16 @@ export default function Home() {
         } else if (inputType === 'audio') {
           userInput = 'Audio input: Please transcribe and respond to this audio.';
         } else if (inputType === 'file') {
-          userInput = `File input: ${selectedFiles.map(f => f.name).join(', ')}. Please analyze these files.`;
+          // Create a more detailed prompt that includes file content
+          const fileNames = selectedFiles.map(f => f.file.name).join(', ');
+          const fileContents = selectedFiles
+            .filter(f => f.content) // Only include files with extracted content
+            .map(f => `--- ${f.file.name} ---\n${f.content}`)
+            .join('\n\n');
+          
+          userInput = `File input: ${fileNames}. Please analyze these files.\n\n${fileContents}`;
+          
+          console.log('File content included in prompt:', fileContents.length > 0);
         }
         
         // Create LLM request
@@ -171,7 +187,7 @@ export default function Home() {
           model: modelCard.llmModel,
           prompt: combinedPrompt,
           parameters: {},
-          files: inputType === 'file' ? selectedFiles : undefined,
+          files: inputType === 'file' ? selectedFiles.map(f => f.file) : undefined,
         };
         
         // Add parameters from model card with proper type conversion
@@ -405,9 +421,21 @@ export default function Home() {
                 {/* File Input */}
                 {inputType === 'file' && (
                   <FileInput
-                    onFilesSelected={(files) => {
-                      setSelectedFiles(files);
+                    onFilesSelected={(filesWithContent) => {
+                      setSelectedFiles(filesWithContent);
+                      
+                      // Log extracted content for debugging
+                      filesWithContent.forEach(f => {
+                        if (f.content) {
+                          console.log(`Extracted content from ${f.file.name}:`,
+                            f.content.length > 100 ? f.content.substring(0, 100) + '...' : f.content);
+                        }
+                        if (f.error) {
+                          console.error(`Error extracting content from ${f.file.name}:`, f.error);
+                        }
+                      });
                     }}
+                    extractContent={true} // Enable content extraction
                   />
                 )}
               </div>

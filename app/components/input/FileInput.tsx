@@ -1,29 +1,62 @@
 import React, { useState, useCallback } from 'react';
 import { useDropzone } from 'react-dropzone';
-import { File, Upload, X } from 'lucide-react';
+import { File as FileIcon, Upload, X } from 'lucide-react';
+
+interface FileWithContent {
+  file: File;
+  content?: string;
+  error?: string;
+}
 
 interface FileInputProps {
-  onFilesSelected: (files: File[]) => void;
+  onFilesSelected: (filesWithContent: FileWithContent[]) => void;
   acceptedFileTypes?: string[];
   maxFiles?: number;
   maxSize?: number; // in bytes
   disabled?: boolean;
   className?: string;
+  extractContent?: boolean; // Whether to extract content from text files
 }
 
 export function FileInput({
   onFilesSelected,
-  acceptedFileTypes = ['image/*', 'application/pdf', '.txt', '.md', '.json'],
+  acceptedFileTypes = ['image/*', 'application/pdf', 'text/plain', 'text/markdown', 'application/json'],
   maxFiles = 5,
   maxSize = 10 * 1024 * 1024, // 10MB default
   disabled = false,
   className = '',
+  extractContent = true, // Default to extracting content
 }: FileInputProps) {
-  const [files, setFiles] = useState<File[]>([]);
+  const [files, setFiles] = useState<FileWithContent[]>([]);
   const [error, setError] = useState<string | null>(null);
 
+  // Helper function to read file content
+  const readFileContent = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        if (event.target?.result) {
+          resolve(event.target.result as string);
+        } else {
+          reject(new Error('Failed to read file content'));
+        }
+      };
+      reader.onerror = () => reject(new Error('File reading error'));
+      reader.readAsText(file);
+    });
+  };
+
+  // Check if file is a text-based file that we should extract content from
+  const isTextFile = (file: File): boolean => {
+    const textTypes = ['text/plain', 'text/markdown', 'application/json', 'text/html', 'text/css', 'text/javascript'];
+    return textTypes.includes(file.type) ||
+           file.name.endsWith('.txt') ||
+           file.name.endsWith('.md') ||
+           file.name.endsWith('.json');
+  };
+
   const onDrop = useCallback(
-    (acceptedFiles: File[], rejectedFiles: any[]) => {
+    async (acceptedFiles: File[], rejectedFiles: any[]) => {
       // Handle rejected files
       if (rejectedFiles.length > 0) {
         const errors = rejectedFiles.map((file) => {
@@ -43,12 +76,30 @@ export function FileInput({
         return;
       }
 
+      // Process files and extract content if needed
+      const filesWithContent: FileWithContent[] = await Promise.all(
+        acceptedFiles.map(async (file) => {
+          const fileWithContent: FileWithContent = { file };
+          
+          // Extract content for text files if extractContent is true
+          if (extractContent && isTextFile(file)) {
+            try {
+              fileWithContent.content = await readFileContent(file);
+            } catch (err) {
+              fileWithContent.error = `Failed to read content: ${err instanceof Error ? err.message : String(err)}`;
+            }
+          }
+          
+          return fileWithContent;
+        })
+      );
+
       // Add new files
-      const newFiles = [...files, ...acceptedFiles];
+      const newFiles = [...files, ...filesWithContent];
       setFiles(newFiles);
       onFilesSelected(newFiles);
     },
-    [files, maxFiles, onFilesSelected]
+    [files, maxFiles, onFilesSelected, extractContent]
   );
 
   const removeFile = (index: number) => {
@@ -59,12 +110,14 @@ export function FileInput({
     setError(null);
   };
 
+  const acceptConfig = acceptedFileTypes.reduce((acc, type) => {
+    acc[type] = [];
+    return acc;
+  }, {} as Record<string, string[]>);
+  
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
-    accept: acceptedFileTypes.reduce((acc, type) => {
-      acc[type] = [];
-      return acc;
-    }, {} as Record<string, string[]>),
+    accept: acceptConfig,
     maxSize,
     disabled,
     maxFiles,
@@ -94,7 +147,7 @@ export function FileInput({
                 Drag & drop files here, or click to select files
               </p>
               <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                Accepted file types: {acceptedFileTypes.join(', ')}
+                Accepted file types: Images, PDFs, Text files, Markdown files, JSON files
               </p>
               <p className="text-xs text-gray-500 dark:text-gray-400">
                 Max size: {Math.round(maxSize / (1024 * 1024))}MB, Max files: {maxFiles}
@@ -116,20 +169,26 @@ export function FileInput({
             Selected Files ({files.length})
           </h4>
           <ul className="space-y-2">
-            {files.map((file, index) => (
+            {files.map((fileWithContent, index) => (
               <li
-                key={`${file.name}-${index}`}
+                key={`${fileWithContent.file.name}-${index}`}
                 className="flex items-center justify-between bg-gray-100 dark:bg-gray-800 rounded-md p-2"
               >
                 <div className="flex items-center">
-                  <File size={16} className="text-gray-500 dark:text-gray-400 mr-2" />
+                  <FileIcon size={16} className="text-gray-500 dark:text-gray-400 mr-2" />
                   <div>
                     <p className="text-sm text-gray-700 dark:text-gray-300 truncate max-w-xs">
-                      {file.name}
+                      {fileWithContent.file.name}
                     </p>
                     <p className="text-xs text-gray-500 dark:text-gray-400">
-                      {(file.size / 1024).toFixed(1)} KB
+                      {(fileWithContent.file.size / 1024).toFixed(1)} KB
                     </p>
+                    {fileWithContent.content && (
+                      <p className="text-xs text-green-500">Content extracted</p>
+                    )}
+                    {fileWithContent.error && (
+                      <p className="text-xs text-red-500">{fileWithContent.error}</p>
+                    )}
                   </div>
                 </div>
                 <button
