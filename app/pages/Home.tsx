@@ -359,6 +359,34 @@ export default function Home() {
           <div className="mb-12 grid grid-cols-1 gap-6">
             {/* Input Component */}
             <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-6">
+              <div className="flex space-x-4 mb-4">
+                
+                  <button
+                    type="button"
+                    onClick={() => setSelectedTarget('modelCard')}
+                    className={`px-4 py-2 rounded-md flex items-center ${
+                      selectedTarget === 'modelCard'
+                        ? 'bg-blue-600 text-white'
+                        : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300'
+                    }`}
+                  >
+                    <PlusCircle size={18} className="mr-2" />
+                    Model Card
+                  </button>
+                  
+                  <button
+                    type="button"
+                    onClick={() => setSelectedTarget('workflow')}
+                    className={`px-4 py-2 rounded-md flex items-center ${
+                      selectedTarget === 'workflow'
+                        ? 'bg-purple-600 text-white'
+                        : 'bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300'
+                    }`}
+                  >
+                    <Workflow size={18} className="mr-2" />
+                    Workflow
+                  </button>
+                </div>
               <h2 className="text-xl font-semibold text-gray-800 dark:text-gray-200 mb-4">
                 Input
               </h2>
@@ -476,7 +504,7 @@ export default function Home() {
                 </label>
                 
                 <div className="flex space-x-4 mb-4">
-                  <button
+                  {/*<button
                     type="button"
                     onClick={() => setSelectedTarget('modelCard')}
                     className={`px-4 py-2 rounded-md flex items-center ${
@@ -487,9 +515,9 @@ export default function Home() {
                   >
                     <PlusCircle size={18} className="mr-2" />
                     Model Card
-                  </button>
+                  </button>*/}
                   
-                  <button
+                  {/*<button
                     type="button"
                     onClick={() => setSelectedTarget('workflow')}
                     className={`px-4 py-2 rounded-md flex items-center ${
@@ -500,7 +528,7 @@ export default function Home() {
                   >
                     <Workflow size={18} className="mr-2" />
                     Workflow
-                  </button>
+                  </button>*/}
                 </div>
                 
                 {/* Model Card Selection */}
