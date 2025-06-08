@@ -12,6 +12,7 @@ export default [
     route("workflows", "pages/Workflows.tsx"),
     route("workflows/new", "pages/WorkflowEditor.tsx", { id: "workflow-new" }),
     route("workflows/:id", "pages/WorkflowEditor.tsx", { id: "workflow-edit" }),
+    route("workflow-execute/:id", "pages/WorkflowExecute.tsx", { id: "workflow-execute" }),
     
     route("mcp-servers", "pages/MCPServerManager.tsx"),
     route("settings", "pages/Settings.tsx"),

@@ -124,3 +124,23 @@ export interface MCPServer {
   createdAt: Date;
   updatedAt: Date;
 }
+
+// Workflow Execution Types
+export interface ExecutionResult {
+  modelId: string;
+  modelName: string;
+  input: string;
+  output: string;
+  usageStatistics: UsageStatistics;
+  timestamp: Date;
+}
+
+export interface WorkflowExecutionResult {
+  workflowId: string;
+  workflowName: string;
+  results: ExecutionResult[];
+  finalOutput: string;
+  totalUsageStatistics: UsageStatistics;
+  startTime: Date;
+  endTime: Date;
+}

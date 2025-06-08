@@ -75,8 +75,9 @@ function WorkflowsContent() {
   // Handle execute workflow
   const handleExecuteWorkflow = (id: string) => {
     try {
-      console.log(`Executing workflow: ${id}`);
-      navigate(`/workflows/${id}`);
+      console.log(`Redirecting to execute workflow: ${id}`);
+      // Redirect to a new route for workflow execution
+      navigate(`/workflow-execute/${id}`);
     } catch (error) {
       console.error(`Error navigating to execute workflow ${id}:`, error);
       setError(`Error navigating to execute workflow: ${error instanceof Error ? error.message : String(error)}`);

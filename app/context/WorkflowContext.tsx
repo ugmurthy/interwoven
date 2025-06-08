@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { v4 as uuidv4 } from 'uuid';
-import { ModelCard, Connection, Tool, ToolResponse } from '../types';
+import { ModelCard, Connection, Tool, ToolResponse, ExecutionResult, WorkflowExecutionResult, LLMRequest, UsageStatistics } from '../types';
+import { useLLM } from './LLMContext';
 import { StorageService } from '../services/storage/StorageService';
 
 // Define the Workflow type
@@ -27,9 +28,13 @@ interface WorkflowContextType {
   createConnection: (sourceId: string, targetId: string, type: Connection['type']) => Connection | null;
   removeConnection: (connectionId: string) => void;
   validateConnection: (sourceId: string, targetId: string, type: Connection['type']) => boolean;
-  executeWorkflow: (input: string) => Promise<any>;
+  executeWorkflow: (workflowId: string, input: string) => Promise<WorkflowExecutionResult>;
   saveWorkflow: () => Promise<void>;
   loadWorkflow: (id: string) => Promise<Workflow | null>;
+  currentExecutionResult: WorkflowExecutionResult | null;
+  executionHistory: WorkflowExecutionResult[];
+  getIntermediateResults: () => ExecutionResult[];
+  isExecuting: boolean;
 }
 
 // Create the context
@@ -63,7 +68,14 @@ export const WorkflowProvider: React.FC<WorkflowProviderProps> = ({ children, st
   const [workflows, setWorkflows] = useState<Workflow[]>([]);
   const [currentWorkflow, setCurrentWorkflow] = useState<Workflow | null>(null);
   const [isInitialized, setIsInitialized] = useState(false);
+  const [currentExecutionResult, setCurrentExecutionResult] = useState<WorkflowExecutionResult | null>(null);
+  const [executionHistory, setExecutionHistory] = useState<WorkflowExecutionResult[]>([]);
+  const [isExecuting, setIsExecuting] = useState(false);
   const storageKey = 'workflows';
+  const executionHistoryKey = 'workflow_execution_history';
+  
+  // Get the LLM service
+  const { sendRequest } = useLLM();
 
   // Load workflows from storage on mount
   useEffect(() => {
@@ -413,33 +425,237 @@ export const WorkflowProvider: React.FC<WorkflowProviderProps> = ({ children, st
     }
   };
 
+  // Load execution history from storage
+  useEffect(() => {
+    if (!isInitialized) return;
+    
+    const loadExecutionHistory = async () => {
+      try {
+        const storedHistory = await storageService.getItem<any[]>(executionHistoryKey);
+        
+        if (storedHistory && Array.isArray(storedHistory)) {
+          // Convert date strings back to Date objects
+          const parsedHistory = storedHistory.map(result => ({
+            ...result,
+            startTime: parseDateSafely(result.startTime),
+            endTime: parseDateSafely(result.endTime),
+            results: Array.isArray(result.results) ? result.results.map((r: any) => ({
+              ...r,
+              timestamp: parseDateSafely(r.timestamp)
+            })) : []
+          }));
+          
+          setExecutionHistory(parsedHistory);
+        }
+      } catch (error) {
+        console.error('Error loading execution history:', error);
+      }
+    };
+    
+    loadExecutionHistory();
+  }, [isInitialized, storageService]);
+  
+  // Save execution history to storage when it changes
+  useEffect(() => {
+    if (!isInitialized || executionHistory.length === 0) return;
+    
+    const saveExecutionHistory = async () => {
+      try {
+        await storageService.setItem(executionHistoryKey, executionHistory);
+      } catch (error) {
+        console.error('Error saving execution history:', error);
+      }
+    };
+    
+    saveExecutionHistory();
+  }, [executionHistory, isInitialized, storageService]);
+
+  // Get intermediate results from the current execution
+  const getIntermediateResults = (): ExecutionResult[] => {
+    if (!currentExecutionResult) return [];
+    return currentExecutionResult.results;
+  };
+
   // Execute the workflow
-  const executeWorkflow = async (input: string): Promise<any> => {
+  const executeWorkflow = async (workflowId: string, input: string): Promise<WorkflowExecutionResult> => {
     try {
-      if (!currentWorkflow) {
-        throw new Error('No workflow selected');
+      setIsExecuting(true);
+      
+      // Find the workflow by ID
+      const workflow = workflows.find(w => w.id === workflowId);
+      if (!workflow) {
+        throw new Error(`Workflow not found: ${workflowId}`);
       }
       
-      console.log(`Executing workflow ${currentWorkflow.name} with input: ${input}`);
+      console.log(`Executing workflow ${workflow.name} with input: ${input}`);
       
-      // This is a placeholder implementation
-      // In a real implementation, this would:
-      // 1. Determine the execution order based on connections
-      // 2. Execute each model card in order
-      // 3. Pass data between model cards based on connections
-      // 4. Handle tool execution
-      // 5. Return the final output
+      // Start tracking execution time
+      const startTime = new Date();
       
-      // Mock execution result
-      return {
-        success: true,
-        output: `Executed workflow ${currentWorkflow.name} with ${currentWorkflow.modelCards.length} model cards and ${currentWorkflow.connections.length} connections.`,
-        timestamp: new Date().toISOString(),
+      // Initialize execution result
+      const executionResult: WorkflowExecutionResult = {
+        workflowId: workflow.id,
+        workflowName: workflow.name,
+        results: [],
+        finalOutput: '',
+        totalUsageStatistics: {
+          promptTokens: 0,
+          completionTokens: 0,
+          totalTokens: 0,
+          executionTime: 0,
+          toolCalls: 0
+        },
+        startTime,
+        endTime: new Date() // Will be updated at the end
       };
+      
+      // Sort model cards based on connections to determine execution order
+      const modelCards = [...workflow.modelCards];
+      const executionOrder = determineExecutionOrder(workflow);
+      
+      if (executionOrder.length === 0) {
+        throw new Error('Could not determine execution order for workflow');
+      }
+      
+      console.log('Execution order:', executionOrder.map(id => {
+        const card = workflow.modelCards.find(c => c.id === id);
+        return card ? card.name : id;
+      }));
+      
+      // Execute each model card in order
+      let currentInput = input;
+      
+      for (const modelCardId of executionOrder) {
+        const modelCard = workflow.modelCards.find(card => card.id === modelCardId);
+        if (!modelCard) {
+          console.warn(`Model card not found: ${modelCardId}`);
+          continue;
+        }
+        
+        console.log(`Executing model card: ${modelCard.name}`);
+        
+        // Create LLM request
+        const request: LLMRequest = {
+          provider: modelCard.llmProvider,
+          model: modelCard.llmModel,
+          prompt: `${modelCard.systemPrompt}\n\n${currentInput}`,
+          parameters: modelCard.parameters.reduce((acc, param) => {
+            acc[param.name] = param.value;
+            return acc;
+          }, {} as Record<string, any>)
+        };
+        
+        // Send request to LLM service
+        const response = await sendRequest(request);
+        
+        // Update current input for next model
+        currentInput = response.content;
+        
+        // Track execution result for this model
+        const modelResult: ExecutionResult = {
+          modelId: modelCard.id,
+          modelName: modelCard.name,
+          input: request.prompt,
+          output: response.content,
+          usageStatistics: {
+            promptTokens: response.usage.promptTokens,
+            completionTokens: response.usage.completionTokens,
+            totalTokens: response.usage.totalTokens,
+            executionTime: 0, // We don't have this from the LLM response
+            toolCalls: response.toolResults?.length || 0
+          },
+          timestamp: new Date()
+        };
+        
+        // Add to results
+        executionResult.results.push(modelResult);
+        
+        // Update total usage statistics
+        executionResult.totalUsageStatistics.promptTokens += response.usage.promptTokens;
+        executionResult.totalUsageStatistics.completionTokens += response.usage.completionTokens;
+        executionResult.totalUsageStatistics.totalTokens += response.usage.totalTokens;
+        executionResult.totalUsageStatistics.toolCalls += response.toolResults?.length || 0;
+      }
+      
+      // Set final output
+      executionResult.finalOutput = currentInput;
+      
+      // Calculate total execution time
+      const endTime = new Date();
+      executionResult.endTime = endTime;
+      executionResult.totalUsageStatistics.executionTime =
+        endTime.getTime() - startTime.getTime();
+      
+      // Update state
+      setCurrentExecutionResult(executionResult);
+      setExecutionHistory(prev => [executionResult, ...prev].slice(0, 10)); // Keep last 10 executions
+      
+      console.log('Workflow execution completed:', executionResult);
+      
+      return executionResult;
     } catch (error) {
       console.error('Error executing workflow:', error);
       throw error;
+    } finally {
+      setIsExecuting(false);
     }
+  };
+  
+  // Helper function to determine execution order based on connections
+  const determineExecutionOrder = (workflow: Workflow): string[] => {
+    // If there are no connections, just return the model cards in their current order
+    if (workflow.connections.length === 0) {
+      return workflow.modelCards.map(card => card.id);
+    }
+    
+    // Build a graph of dependencies
+    const graph: Record<string, string[]> = {};
+    const inDegree: Record<string, number> = {};
+    
+    // Initialize graph and in-degree for all model cards
+    workflow.modelCards.forEach(card => {
+      graph[card.id] = [];
+      inDegree[card.id] = 0;
+    });
+    
+    // Build the graph based on connections
+    workflow.connections.forEach(conn => {
+      if (conn.type === 'model-to-model') {
+        graph[conn.sourceId].push(conn.targetId);
+        inDegree[conn.targetId] = (inDegree[conn.targetId] || 0) + 1;
+      }
+    });
+    
+    // Find all sources (nodes with in-degree 0)
+    const queue: string[] = [];
+    Object.keys(inDegree).forEach(id => {
+      if (inDegree[id] === 0) {
+        queue.push(id);
+      }
+    });
+    
+    // Perform topological sort
+    const result: string[] = [];
+    while (queue.length > 0) {
+      const current = queue.shift()!;
+      result.push(current);
+      
+      graph[current].forEach(neighbor => {
+        inDegree[neighbor]--;
+        if (inDegree[neighbor] === 0) {
+          queue.push(neighbor);
+        }
+      });
+    }
+    
+    // Check if we have a valid ordering (all nodes included)
+    if (result.length !== workflow.modelCards.length) {
+      console.warn('Circular dependency detected in workflow');
+      // Fall back to original order
+      return workflow.modelCards.map(card => card.id);
+    }
+    
+    return result;
   };
 
   // Save the current workflow
@@ -495,6 +711,10 @@ export const WorkflowProvider: React.FC<WorkflowProviderProps> = ({ children, st
     executeWorkflow,
     saveWorkflow,
     loadWorkflow,
+    currentExecutionResult,
+    executionHistory,
+    getIntermediateResults,
+    isExecuting
   };
 
   return (

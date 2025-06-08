@@ -6,9 +6,12 @@ import { TextInput } from '../components/input/TextInput';
 import { AudioInput } from '../components/input/AudioInput';
 import { FileInput } from '../components/input/FileInput';
 import { OutputRenderer } from '../components/output/OutputRenderer';
+import { WorkflowInputWrapper } from '../components/workflow/WorkflowInputWrapper';
+import { WorkflowOutputRenderer } from '../components/workflow/WorkflowOutputRenderer';
 import { useLLM } from '../context/LLMContext';
 import { useModelCard } from '../context/ModelCardContext';
-import { LLMRequest, Output, UsageStatistics } from '../types';
+import { useWorkflow } from '../context/WorkflowContext';
+import { LLMRequest, Output, UsageStatistics, WorkflowExecutionResult } from '../types';
 
 export default function Home() {
   // State to track if we're in the browser
@@ -22,6 +25,7 @@ export default function Home() {
   // Safe access to context hooks with conditional rendering
   const llmContext = isBrowser ? useLLM() : null;
   const modelCardContext = isBrowser ? useModelCard() : null;
+  const workflowContext = isBrowser ? useWorkflow() : null;
   
   // Get LLM service and model cards if in browser
   const sendRequest = llmContext?.sendRequest;
@@ -29,6 +33,7 @@ export default function Home() {
   const providers = llmContext?.providers || { openrouter: { availableModels: [] }, ollama: { availableModels: [] } };
   const modelCards = modelCardContext?.modelCards || [];
   const isLoadingModelCards = modelCardContext?.isLoading || false;
+  const workflows = workflowContext?.workflows || [];
   
   // State for input, output, and selection
   const [inputType, setInputType] = useState<'text' | 'audio' | 'file'>('text');
@@ -171,32 +176,9 @@ export default function Home() {
           metadata: response.metadata,
         });
       } else if (selectedTarget === 'workflow' && selectedWorkflowId) {
-        // Workflow processing would go here
-        // For now, just create a placeholder output
-        
-        // Get the appropriate input based on type
-        let inputContent = '';
-        if (inputType === 'text') {
-          inputContent = textInput;
-        } else if (inputType === 'audio') {
-          inputContent = 'Audio input';
-        } else if (inputType === 'file') {
-          inputContent = `Files: ${selectedFiles.map(f => f.name).join(', ')}`;
-        }
-        
-        setOutput({
-          id: `workflow-${Date.now()}`,
-          type: 'text',
-          content: `Processed input using workflow: ${selectedWorkflowId}\n\nInput: ${inputContent}`,
-          usageStatistics: {
-            promptTokens: 0,
-            completionTokens: 0,
-            totalTokens: 0,
-            executionTime: 0,
-            toolCalls: 0,
-          },
-          metadata: {},
-        });
+        // Workflow execution is now handled by the WorkflowInputWrapper component
+        // This code path should not be reached anymore
+        console.warn('Workflow execution should be handled by WorkflowInputWrapper');
       }
     } catch (error) {
       console.error('Error processing input:', error);
@@ -446,46 +428,86 @@ export default function Home() {
                 {selectedTarget === 'workflow' && (
                   <div className="mb-4">
                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                      Select Workflow:
+                      Workflow Execution:
                     </label>
                     
-                    <div className="text-sm text-gray-500 dark:text-gray-400">
-                      Workflow selection coming soon. <Link to="/workflows" className="text-blue-600 dark:text-blue-400 hover:underline">Create a workflow</Link>
-                    </div>
+                    {workflows.length === 0 ? (
+                      <div className="text-sm text-gray-500 dark:text-gray-400">
+                        No workflows available. <Link to="/workflows" className="text-blue-600 dark:text-blue-400 hover:underline">Create a workflow</Link>
+                      </div>
+                    ) : (
+                      <div>
+                        <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+                          Select a workflow from the dropdown below and enter your input. Then click the "Execute Workflow" button.
+                        </p>
+                        <WorkflowInputWrapper
+                          onExecutionComplete={(result: WorkflowExecutionResult) => {
+                            // Create an output object from the execution result
+                            const newOutput: Output = {
+                              id: `workflow-${Date.now()}`,
+                              type: 'markdown',
+                              content: result.finalOutput,
+                              usageStatistics: result.totalUsageStatistics,
+                              metadata: {
+                                workflowId: result.workflowId,
+                                workflowName: result.workflowName,
+                                executionTime: result.totalUsageStatistics.executionTime,
+                                timestamp: new Date().toISOString()
+                              }
+                            };
+                            
+                            setOutput(newOutput);
+                            setIsProcessing(false);
+                          }}
+                          className="mb-4"
+                        >
+                          <TextInput
+                            initialValue={textInput}
+                            onChange={setTextInput}
+                            placeholder="Enter your text input for the workflow..."
+                            rows={4}
+                          />
+                        </WorkflowInputWrapper>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
               
-              <div className="flex justify-end">
-                <button
-                  type="button"
-                  onClick={handleSubmit}
-                  disabled={
-                    (inputType === 'text' && !textInput.trim()) ||
-                    (inputType === 'audio' && !audioBlob) ||
-                    (inputType === 'file' && selectedFiles.length === 0) ||
-                    !selectedTarget ||
-                    (selectedTarget === 'modelCard' && !selectedModelCardId) ||
-                    isProcessing
-                  }
-                  className={`flex items-center px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors duration-200 ${
-                    ((inputType === 'text' && !textInput.trim()) ||
-                     (inputType === 'audio' && !audioBlob) ||
-                     (inputType === 'file' && selectedFiles.length === 0) ||
-                     !selectedTarget ||
-                     (selectedTarget === 'modelCard' && !selectedModelCardId) ||
-                     isProcessing) && 'opacity-50 cursor-not-allowed'
-                  }`}
-                >
-                  {isProcessing ? 'Processing...' : 'Process'}
-                  <Send size={18} className="ml-2" />
-                </button>
-              </div>
+              {selectedTarget === 'modelCard' && (
+                <div className="flex justify-end">
+                  <button
+                    type="button"
+                    onClick={handleSubmit}
+                    disabled={
+                      (inputType === 'text' && !textInput.trim()) ||
+                      (inputType === 'audio' && !audioBlob) ||
+                      (inputType === 'file' && selectedFiles.length === 0) ||
+                      !selectedModelCardId ||
+                      isProcessing
+                    }
+                    className={`flex items-center px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors duration-200 ${
+                      ((inputType === 'text' && !textInput.trim()) ||
+                       (inputType === 'audio' && !audioBlob) ||
+                       (inputType === 'file' && selectedFiles.length === 0) ||
+                       !selectedModelCardId ||
+                       isProcessing) && 'opacity-50 cursor-not-allowed'
+                    }`}
+                  >
+                    {isProcessing ? 'Processing...' : 'Process with Model Card'}
+                    <Send size={18} className="ml-2" />
+                  </button>
+                </div>
+              )}
             </div>
             
             {/* Output Component */}
             {output ? (
-              <OutputRenderer output={output} />
+              selectedTarget === 'workflow' ? (
+                <WorkflowOutputRenderer output={output} />
+              ) : (
+                <OutputRenderer output={output} />
+              )
             ) : (
               <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-6">
                 <h2 className="text-xl font-semibold text-gray-800 dark:text-gray-200 mb-4">
