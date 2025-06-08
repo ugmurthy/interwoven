@@ -565,73 +565,36 @@ export default function Home() {
                           </button>
                         </div>
                         
-                        <WorkflowInputWrapper
-                          inputValue={textInput}
-                          onInputSubmit={() => {
-                            console.log("WorkflowInputWrapper onInputSubmit called with input:", textInput);
-                            if (selectedWorkflowId && workflowContext?.executeWorkflow) {
-                              setIsProcessing(true);
-                              // Directly execute the workflow with the current text input
-                              workflowContext.executeWorkflow(selectedWorkflowId, textInput)
-                                .then(result => {
-                                  console.log("Workflow execution completed:", result);
-                                  // Create output from result
-                                  const newOutput: Output = {
-                                    id: `workflow-${Date.now()}`,
-                                    type: 'markdown',
-                                    content: result.finalOutput,
-                                    usageStatistics: result.totalUsageStatistics,
-                                    metadata: {
-                                      workflowId: result.workflowId,
-                                      workflowName: result.workflowName,
-                                      executionTime: result.totalUsageStatistics.executionTime,
-                                      timestamp: new Date().toISOString()
-                                    }
-                                  };
-                                  setOutput(newOutput);
-                                })
-                                .catch(err => {
-                                  console.error("Error executing workflow:", err);
-                                  // Show error in output
-                                  setOutput({
-                                    id: `error-${Date.now()}`,
-                                    type: 'text',
-                                    content: `Error executing workflow: ${err instanceof Error ? err.message : String(err)}`,
-                                    usageStatistics: {
-                                      promptTokens: 0,
-                                      completionTokens: 0,
-                                      totalTokens: 0,
-                                      executionTime: 0,
-                                      toolCalls: 0,
-                                    },
-                                    metadata: {},
-                                  });
-                                })
-                                .finally(() => {
-                                  setIsProcessing(false);
-                                });
-                            }
-                          }}
-                          onExecutionComplete={(result: WorkflowExecutionResult) => {
-                            // Create an output object from the execution result
-                            const newOutput: Output = {
-                              id: `workflow-${Date.now()}`,
-                              type: 'markdown',
-                              content: result.finalOutput,
-                              usageStatistics: result.totalUsageStatistics,
-                              metadata: {
-                                workflowId: result.workflowId,
-                                workflowName: result.workflowName,
-                                executionTime: result.totalUsageStatistics.executionTime,
-                                timestamp: new Date().toISOString()
+                        {/* Hide the original WorkflowInputWrapper since we're using the direct button */}
+                        <div className="hidden">
+                          <WorkflowInputWrapper
+                            inputValue={textInput}
+                            onInputSubmit={() => {
+                              // Direct execution is now handled by the button above
+                              if (selectedWorkflowId && workflowContext?.executeWorkflow) {
+                                workflowContext.executeWorkflow(selectedWorkflowId, textInput);
                               }
-                            };
-                            
-                            setOutput(newOutput);
-                            setIsProcessing(false);
-                          }}
-                          className="mb-4"
-                        />
+                            }}
+                            onExecutionComplete={(result: WorkflowExecutionResult) => {
+                              // Create an output object from the execution result
+                              const newOutput: Output = {
+                                id: `workflow-${Date.now()}`,
+                                type: 'markdown',
+                                content: result.finalOutput,
+                                usageStatistics: result.totalUsageStatistics,
+                                metadata: {
+                                  workflowId: result.workflowId,
+                                  workflowName: result.workflowName,
+                                  executionTime: result.totalUsageStatistics.executionTime,
+                                  timestamp: new Date().toISOString()
+                                }
+                              };
+                              
+                              setOutput(newOutput);
+                              setIsProcessing(false);
+                            }}
+                            className="mb-4"
+                          />
                       </div>
                     )}
                   </div>

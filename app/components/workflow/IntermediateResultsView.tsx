@@ -1,23 +1,59 @@
 import React, { useState } from 'react';
 import { ExecutionResult, WorkflowExecutionResult } from '../../types';
-import { ChevronDown, ChevronRight, Clock, FileText, Zap } from 'lucide-react';
+import { ChevronDown, ChevronRight, Clock, FileText, Zap, MessageSquare, BarChart2, Code } from 'lucide-react';
 
 interface IntermediateResultsViewProps {
   executionResult: WorkflowExecutionResult;
   className?: string;
 }
 
+// Define section types for collapsible sections
+type SectionType = 'input' | 'systemPrompt' | 'output' | 'usage';
+
 export function IntermediateResultsView({
   executionResult,
   className = '',
 }: IntermediateResultsViewProps) {
+  // Track expanded state for each model
   const [expandedResults, setExpandedResults] = useState<Record<string, boolean>>({});
+  
+  // Track expanded state for each section within each model
+  const [expandedSections, setExpandedSections] = useState<Record<string, Record<SectionType, boolean>>>({});
 
   // Toggle expansion of a result
   const toggleExpand = (modelId: string) => {
     setExpandedResults(prev => ({
       ...prev,
       [modelId]: !prev[modelId]
+    }));
+    
+    // Initialize section states if this model is being expanded for the first time
+    if (!expandedSections[modelId]) {
+      setExpandedSections(prev => ({
+        ...prev,
+        [modelId]: {
+          input: true,
+          systemPrompt: false, // System prompt is hidden by default
+          output: true,
+          usage: false // Usage is collapsed by default
+        }
+      }));
+    }
+  };
+  
+  // Toggle expansion of a specific section
+  const toggleSection = (modelId: string, section: SectionType) => {
+    setExpandedSections(prev => ({
+      ...prev,
+      [modelId]: {
+        ...(prev[modelId] || {
+          input: true,
+          systemPrompt: false,
+          output: true,
+          usage: false
+        }),
+        [section]: !(prev[modelId]?.[section] ?? false)
+      }
     }));
   };
 
@@ -107,55 +143,144 @@ export function IntermediateResultsView({
             </div>
             
             {expandedResults[result.modelId] && (
-              <div className="p-3">
-                <div className="mb-3">
-                  <h5 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                    Input
-                  </h5>
-                  <div className="bg-gray-50 dark:bg-gray-900 p-2 rounded text-sm whitespace-pre-wrap">
-                    {result.input}
+              <div className="p-3 space-y-3">
+                {/* Input Section - Collapsible */}
+                <div className="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
+                  <div
+                    className="flex justify-between items-center p-2 bg-blue-50 dark:bg-blue-900/30 cursor-pointer"
+                    onClick={() => toggleSection(result.modelId, 'input')}
+                  >
+                    <div className="flex items-center">
+                      {expandedSections[result.modelId]?.input ? (
+                        <ChevronDown size={14} className="mr-2 text-blue-600 dark:text-blue-400" />
+                      ) : (
+                        <ChevronRight size={14} className="mr-2 text-blue-600 dark:text-blue-400" />
+                      )}
+                      <span className="font-medium text-blue-700 dark:text-blue-300 flex items-center">
+                        <MessageSquare size={14} className="mr-1" />
+                        Input
+                      </span>
+                    </div>
+                    <div className="text-xs text-blue-600 dark:text-blue-400">
+                      {result.input.length} characters
+                    </div>
                   </div>
+                  
+                  {expandedSections[result.modelId]?.input && (
+                    <div className="p-2">
+                      {/* System Prompt Section - Hidden by default */}
+                      <div className="mb-2 border-l-2 border-gray-300 dark:border-gray-600">
+                        <div
+                          className="flex items-center p-1 pl-2 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800"
+                          onClick={() => toggleSection(result.modelId, 'systemPrompt')}
+                        >
+                          {expandedSections[result.modelId]?.systemPrompt ? (
+                            <ChevronDown size={12} className="mr-1 text-gray-500 dark:text-gray-400" />
+                          ) : (
+                            <ChevronRight size={12} className="mr-1 text-gray-500 dark:text-gray-400" />
+                          )}
+                          <span className="text-xs font-medium text-gray-500 dark:text-gray-400 flex items-center">
+                            <Code size={12} className="mr-1" />
+                            System Prompt
+                          </span>
+                        </div>
+                        
+                        {expandedSections[result.modelId]?.systemPrompt && (
+                          <div className="bg-gray-50 dark:bg-gray-900 p-2 ml-2 rounded text-xs text-gray-600 dark:text-gray-400 whitespace-pre-wrap border-l-2 border-gray-300 dark:border-gray-600">
+                            {/* Extract system prompt from input - assuming format: systemPrompt\n\nuserInput */}
+                            {result.input.split('\n\n')[0]}
+                          </div>
+                        )}
+                      </div>
+                      
+                      {/* User Input */}
+                      <div className="bg-gray-50 dark:bg-gray-900 p-2 rounded text-sm whitespace-pre-wrap">
+                        {/* Show only user input part */}
+                        {result.input.includes('\n\n') ? result.input.split('\n\n').slice(1).join('\n\n') : result.input}
+                      </div>
+                    </div>
+                  )}
                 </div>
                 
-                <div className="mb-3">
-                  <h5 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                    Output
-                  </h5>
-                  <div className="bg-gray-50 dark:bg-gray-900 p-2 rounded text-sm whitespace-pre-wrap">
-                    {result.output}
+                {/* Output Section - Collapsible */}
+                <div className="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
+                  <div
+                    className="flex justify-between items-center p-2 bg-green-50 dark:bg-green-900/30 cursor-pointer"
+                    onClick={() => toggleSection(result.modelId, 'output')}
+                  >
+                    <div className="flex items-center">
+                      {expandedSections[result.modelId]?.output ? (
+                        <ChevronDown size={14} className="mr-2 text-green-600 dark:text-green-400" />
+                      ) : (
+                        <ChevronRight size={14} className="mr-2 text-green-600 dark:text-green-400" />
+                      )}
+                      <span className="font-medium text-green-700 dark:text-green-300 flex items-center">
+                        <FileText size={14} className="mr-1" />
+                        Output
+                      </span>
+                    </div>
+                    <div className="text-xs text-green-600 dark:text-green-400">
+                      {result.output.length} characters
+                    </div>
                   </div>
+                  
+                  {expandedSections[result.modelId]?.output && (
+                    <div className="bg-gray-50 dark:bg-gray-900 p-2 text-sm whitespace-pre-wrap">
+                      {result.output}
+                    </div>
+                  )}
                 </div>
                 
-                <div>
-                  <h5 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                    Usage Statistics
-                  </h5>
-                  <div className="grid grid-cols-2 gap-2 text-xs">
-                    <div className="bg-gray-50 dark:bg-gray-900 p-2 rounded">
-                      <span className="text-gray-500 dark:text-gray-400">Prompt Tokens:</span>{' '}
-                      <span className="font-medium text-gray-700 dark:text-gray-300">
-                        {result.usageStatistics.promptTokens}
+                {/* Usage Statistics Section - Collapsible */}
+                <div className="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
+                  <div
+                    className="flex justify-between items-center p-2 bg-purple-50 dark:bg-purple-900/30 cursor-pointer"
+                    onClick={() => toggleSection(result.modelId, 'usage')}
+                  >
+                    <div className="flex items-center">
+                      {expandedSections[result.modelId]?.usage ? (
+                        <ChevronDown size={14} className="mr-2 text-purple-600 dark:text-purple-400" />
+                      ) : (
+                        <ChevronRight size={14} className="mr-2 text-purple-600 dark:text-purple-400" />
+                      )}
+                      <span className="font-medium text-purple-700 dark:text-purple-300 flex items-center">
+                        <BarChart2 size={14} className="mr-1" />
+                        Usage Statistics
                       </span>
                     </div>
-                    <div className="bg-gray-50 dark:bg-gray-900 p-2 rounded">
-                      <span className="text-gray-500 dark:text-gray-400">Completion Tokens:</span>{' '}
-                      <span className="font-medium text-gray-700 dark:text-gray-300">
-                        {result.usageStatistics.completionTokens}
-                      </span>
-                    </div>
-                    <div className="bg-gray-50 dark:bg-gray-900 p-2 rounded">
-                      <span className="text-gray-500 dark:text-gray-400">Total Tokens:</span>{' '}
-                      <span className="font-medium text-gray-700 dark:text-gray-300">
-                        {result.usageStatistics.totalTokens}
-                      </span>
-                    </div>
-                    <div className="bg-gray-50 dark:bg-gray-900 p-2 rounded">
-                      <span className="text-gray-500 dark:text-gray-400">Tool Calls:</span>{' '}
-                      <span className="font-medium text-gray-700 dark:text-gray-300">
-                        {result.usageStatistics.toolCalls}
-                      </span>
+                    <div className="text-xs text-purple-600 dark:text-purple-400">
+                      {result.usageStatistics.totalTokens} tokens
                     </div>
                   </div>
+                  
+                  {expandedSections[result.modelId]?.usage && (
+                    <div className="grid grid-cols-2 gap-2 p-2 text-xs">
+                      <div className="bg-gray-50 dark:bg-gray-900 p-2 rounded">
+                        <span className="text-gray-500 dark:text-gray-400">Prompt Tokens:</span>{' '}
+                        <span className="font-medium text-gray-700 dark:text-gray-300">
+                          {result.usageStatistics.promptTokens}
+                        </span>
+                      </div>
+                      <div className="bg-gray-50 dark:bg-gray-900 p-2 rounded">
+                        <span className="text-gray-500 dark:text-gray-400">Completion Tokens:</span>{' '}
+                        <span className="font-medium text-gray-700 dark:text-gray-300">
+                          {result.usageStatistics.completionTokens}
+                        </span>
+                      </div>
+                      <div className="bg-gray-50 dark:bg-gray-900 p-2 rounded">
+                        <span className="text-gray-500 dark:text-gray-400">Total Tokens:</span>{' '}
+                        <span className="font-medium text-gray-700 dark:text-gray-300">
+                          {result.usageStatistics.totalTokens}
+                        </span>
+                      </div>
+                      <div className="bg-gray-50 dark:bg-gray-900 p-2 rounded">
+                        <span className="text-gray-500 dark:text-gray-400">Tool Calls:</span>{' '}
+                        <span className="font-medium text-gray-700 dark:text-gray-300">
+                          {result.usageStatistics.toolCalls}
+                        </span>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
             )}

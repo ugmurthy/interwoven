@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, forwardRef, useImperativeHandle, useRef } from 'react';
 
 interface TextInputProps {
   initialValue?: string;
@@ -10,7 +10,7 @@ interface TextInputProps {
   className?: string;
 }
 
-export function TextInput({
+export const TextInput = forwardRef<HTMLTextAreaElement, TextInputProps>(({
   initialValue = '',
   placeholder = 'Enter text here...',
   onChange,
@@ -18,8 +18,12 @@ export function TextInput({
   disabled = false,
   rows = 4,
   className = '',
-}: TextInputProps) {
+}, ref) => {
   const [value, setValue] = useState(initialValue);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  
+  // Forward the ref to the textarea element
+  useImperativeHandle(ref, () => textareaRef.current!);
 
   const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const newValue = e.target.value;
@@ -40,6 +44,7 @@ export function TextInput({
   return (
     <div className={`w-full ${className}`}>
       <textarea
+        ref={textareaRef}
         value={value}
         onChange={handleChange}
         onKeyDown={handleKeyDown}
@@ -63,4 +68,7 @@ export function TextInput({
       )}
     </div>
   );
-}
+});
+
+// Add display name for better debugging
+TextInput.displayName = 'TextInput';

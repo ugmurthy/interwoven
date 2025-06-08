@@ -3,19 +3,29 @@ import { useWorkflow } from '../../context/WorkflowContext';
 import { Send } from 'lucide-react';
 
 interface WorkflowInputWrapperProps {
-  children: ReactNode;
+  children?: ReactNode;
   onExecutionComplete?: (result: any) => void;
   className?: string;
+  inputValue?: string;
+  onInputSubmit?: (input: string) => void;
 }
 
 export function WorkflowInputWrapper({
   children,
   onExecutionComplete,
   className = '',
+  inputValue = '',
+  onInputSubmit,
 }: WorkflowInputWrapperProps) {
   const { workflows, executeWorkflow, isExecuting } = useWorkflow();
   const [selectedWorkflowId, setSelectedWorkflowId] = useState<string>('');
   const [error, setError] = useState<string | null>(null);
+  const [localInputValue, setLocalInputValue] = useState(inputValue);
+  
+  // Update local input value when prop changes
+  useEffect(() => {
+    setLocalInputValue(inputValue);
+  }, [inputValue]);
 
   // Handle workflow selection
   const handleWorkflowSelection = (e: React.ChangeEvent<HTMLSelectElement>) => {
@@ -38,7 +48,7 @@ export function WorkflowInputWrapper({
     
     try {
       // Update the input value state
-      setInputValue(input);
+      setLocalInputValue(input);
       
       // Execute the workflow
       const result = await executeWorkflow(selectedWorkflowId, input);
@@ -52,8 +62,8 @@ export function WorkflowInputWrapper({
     }
   };
 
-  // Clone the child component and inject the onSubmit and onChange props
-  const childrenWithProps = React.Children.map(children, child => {
+  // Only clone children if they exist
+  const childrenWithProps = children ? React.Children.map(children, child => {
     if (React.isValidElement(child)) {
       // Check if the child component accepts onSubmit and disabled props
       const childProps: any = {};
@@ -71,7 +81,7 @@ export function WorkflowInputWrapper({
       if ('onChange' in child.props) {
         const originalOnChange = child.props.onChange;
         childProps.onChange = (value: string) => {
-          setInputValue(value);
+          setLocalInputValue(value);
           if (originalOnChange) {
             originalOnChange(value);
           }
@@ -81,21 +91,17 @@ export function WorkflowInputWrapper({
       return React.cloneElement(child, childProps);
     }
     return child;
-  });
-
-  // Get input value from child component
-  const [inputValue, setInputValue] = useState('');
-  
-  // Effect to extract input value from child props
-  useEffect(() => {
-    if (React.isValidElement(children) && children.props.initialValue) {
-      setInputValue(children.props.initialValue);
-    }
-  }, [children]);
+  }) : null;
   
   // Handle direct submit button click
   const handleSubmitButtonClick = () => {
-    handleSubmit(inputValue);
+    if (onInputSubmit) {
+      // If parent is handling submission, call the parent handler
+      onInputSubmit(localInputValue);
+    } else {
+      // Otherwise handle locally
+      handleSubmit(localInputValue);
+    }
   };
 
   return (
@@ -128,7 +134,7 @@ export function WorkflowInputWrapper({
         </div>
       )}
 
-      {/* Input component */}
+      {/* Input component - only render if children are provided */}
       {childrenWithProps}
       
       {/* Submit button */}
